@@ -97,6 +97,9 @@ func New(cfg Config) http.Handler {
 	return mux
 }
 
+// workingTreeHash is the special hash used for uncommitted changes.
+const workingTreeHash = "working"
+
 func handleGetDiff(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -104,6 +107,22 @@ func handleGetDiff(state *State) http.HandlerFunc {
 		commitHash := r.URL.Query().Get("commit")
 		if commitHash == "" || state.repoDir == "" {
 			json.NewEncoder(w).Encode(state.getDiff())
+			return
+		}
+
+		// Handle uncommitted changes
+		if commitHash == workingTreeHash {
+			reader, err := gitcmd.DiffUncommitted(context.Background(), state.repoDir)
+			if err != nil {
+				http.Error(w, `{"error":"failed to get uncommitted diff"}`, http.StatusInternalServerError)
+				return
+			}
+			files, _, err := gitdiff.Parse(reader)
+			if err != nil {
+				http.Error(w, `{"error":"failed to parse diff"}`, http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(diff.FromGitDiff(files))
 			return
 		}
 
@@ -147,10 +166,24 @@ func handleCommits(state *State) http.HandlerFunc {
 			return
 		}
 
-		commits, err := gitcmd.Log(context.Background(), state.repoDir, 50)
+		ctx := context.Background()
+
+		commits, err := gitcmd.Log(ctx, state.repoDir, 50)
 		if err != nil {
 			http.Error(w, `{"error":"failed to get commits"}`, http.StatusInternalServerError)
 			return
+		}
+
+		// Prepend uncommitted changes entry if there are any
+		if gitcmd.HasUncommittedChanges(ctx, state.repoDir) {
+			working := gitcmd.Commit{
+				Hash:    workingTreeHash,
+				Short:   "working",
+				Subject: "Uncommitted changes",
+				Author:  "",
+				Date:    "",
+			}
+			commits = append([]gitcmd.Commit{working}, commits...)
 		}
 
 		json.NewEncoder(w).Encode(commits)

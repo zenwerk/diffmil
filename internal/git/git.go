@@ -82,6 +82,36 @@ func Log(ctx context.Context, dir string, maxCount int) ([]Commit, error) {
 	return commits, nil
 }
 
+// HasUncommittedChanges returns true if there are uncommitted changes (staged or unstaged).
+func HasUncommittedChanges(ctx context.Context, dir string) bool {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--quiet", "HEAD")
+	cmd.Dir = dir
+	if cmd.Run() != nil {
+		// Non-zero exit means there are differences
+		return true
+	}
+	// Also check for untracked files
+	cmd2 := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
+	cmd2.Dir = dir
+	out, err := cmd2.Output()
+	if err != nil {
+		return false
+	}
+	return len(strings.TrimSpace(string(out))) > 0
+}
+
+// DiffUncommitted returns the diff of uncommitted changes against HEAD.
+func DiffUncommitted(ctx context.Context, dir string) (io.Reader, error) {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--no-ext-diff", "--color=never", "HEAD")
+	cmd.Dir = dir
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(out), nil
+}
+
 // IsGitRepo returns true if the given directory is inside a git repository.
 func IsGitRepo(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
