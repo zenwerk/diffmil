@@ -144,25 +144,45 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 
 // --- Control commands ---
 
-func runStatus(url string) {
-	client := &http.Client{Timeout: 2 * time.Second}
+type statusResponse struct {
+	App    string `json:"app"`
+	Status string `json:"status"`
+	PID    int    `json:"pid"`
+}
+
+func fetchStatus(url string, timeout ...time.Duration) (*statusResponse, error) {
+	t := 2 * time.Second
+	if len(timeout) > 0 {
+		t = timeout[0]
+	}
+	client := &http.Client{Timeout: t}
 	resp, err := client.Get(url + "/_/api/status")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "diffmil: no server running at %s\n", url)
-		os.Exit(1)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var status struct {
-		Status string `json:"status"`
-		PID    int    `json:"pid"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		fmt.Fprintf(os.Stderr, "diffmil: failed to read status: %v\n", err)
-		os.Exit(1)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status: %s", resp.Status)
 	}
 
-	fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, status.PID, status.Status)
+	var s statusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return nil, err
+	}
+	if s.App != "diffmil" {
+		return nil, fmt.Errorf("not a diffmil server (app=%q)", s.App)
+	}
+	return &s, nil
+}
+
+func runStatus(url string) {
+	s, err := fetchStatus(url)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: no server running at %s (%v)\n", url, err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, s.PID, s.Status)
 }
 
 func runShutdown(url string) {
@@ -242,15 +262,10 @@ func spawnBackground(port int) (int, error) {
 
 func waitForReady(baseURL string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 500 * time.Millisecond}
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(baseURL + "/_/api/status")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
+		if _, err := fetchStatus(baseURL, 500*time.Millisecond); err == nil {
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -258,13 +273,8 @@ func waitForReady(baseURL string, timeout time.Duration) error {
 }
 
 func probeServer(baseURL string) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(baseURL + "/_/api/status")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	_, err := fetchStatus(baseURL, 500*time.Millisecond)
+	return err == nil
 }
 
 func postDiff(baseURL string, diffResp *diff.DiffResponse) error {
