@@ -20,7 +20,6 @@ type Highlighter = Awaited<ReturnType<typeof createHighlighter>>;
 
 interface HighlighterContextValue {
   ready: boolean;
-  langVersion: number;
   highlightLines: (
     lines: string[],
     lang: string,
@@ -30,7 +29,6 @@ interface HighlighterContextValue {
 
 const HighlighterContext = createContext<HighlighterContextValue>({
   ready: false,
-  langVersion: 0,
   highlightLines: () => [],
 });
 
@@ -180,10 +178,10 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
     if (loadedLangs.current.has(lang) || loadingLangs.current.has(lang)) return;
     if (!(lang in bundledLanguages)) return;
 
-    loadingLangs.current.add(lang);
     const hl = hlRef.current;
     if (!hl) return;
 
+    loadingLangs.current.add(lang);
     hl.loadLanguage(lang as BundledLanguage)
       .then(() => {
         loadedLangs.current.add(lang);
@@ -195,13 +193,17 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
+  // langVersion in deps ensures a new function reference when a language finishes loading,
+  // so consumers' useMemo re-runs without needing to know about langVersion directly.
   const highlightLines = useCallback(
     (lines: string[], lang: string, theme: string): ThemedToken[][] => {
       const hl = hlRef.current;
       if (!hl) return [];
 
       if (!loadedLangs.current.has(lang)) {
-        loadLanguage(lang);
+        if (!loadingLangs.current.has(lang)) {
+          loadLanguage(lang);
+        }
         return [];
       }
 
@@ -216,12 +218,12 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
         return [];
       }
     },
-    [loadLanguage],
+    [loadLanguage, langVersion],
   );
 
   return createElement(
     HighlighterContext.Provider,
-    { value: { ready, langVersion, highlightLines } },
+    { value: { ready, highlightLines } },
     children,
   );
 }

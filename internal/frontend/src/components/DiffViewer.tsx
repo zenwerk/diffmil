@@ -14,7 +14,7 @@ interface DiffViewerProps {
 
 export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
   const meta = STATUS_META[file.status] ?? STATUS_META.modified;
-  const { ready, langVersion, highlightLines } = useHighlighter();
+  const { ready, highlightLines } = useHighlighter();
 
   const allLineTokens = useMemo(() => {
     if (!ready || file.chunks.length === 0) return null;
@@ -37,13 +37,13 @@ export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
     for (const chunk of file.chunks) {
       const chunkTokens: (ThemedToken[] | undefined)[] = [];
       for (let i = 0; i < chunk.lines.length; i++) {
-        chunkTokens.push(tokens[idx] ?? undefined);
+        chunkTokens.push(tokens[idx]);
         idx++;
       }
       result.push(chunkTokens);
     }
     return result;
-  }, [ready, langVersion, file, shikiTheme, highlightLines]);
+  }, [ready, file, shikiTheme, highlightLines]);
 
   const ChunkComponent = viewMode === "split" ? SplitDiffChunk : DiffChunk;
 
