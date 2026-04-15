@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "server port")
 	noOpen := flag.Bool("no-open", false, "don't open browser")
+	foreground := flag.Bool("foreground", false, "run server in foreground (don't daemonize)")
 	flag.Parse()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -37,18 +39,39 @@ func main() {
 
 	// Check if a server is already running on this port
 	if probeServer(url) {
-		// Post diff to existing server
 		if err := postDiff(url, cfg.InitialDiff); err != nil {
 			log.Fatalf("failed to send diff to existing server: %v", err)
 		}
-		fmt.Printf("Sent diff to existing server at %s\n", url)
+		fmt.Fprintf(os.Stderr, "diffmil: sent diff to existing server at %s\n", url)
 		if !*noOpen {
 			browser.OpenURL(url)
 		}
 		return
 	}
 
-	// Start new server
+	// If not foreground mode, spawn a child process and exit
+	if !*foreground {
+		pid, err := spawnBackground(*port, *noOpen)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Wait for child to be ready
+		if err := waitForReady(url, 10*time.Second); err != nil {
+			log.Fatalf("server failed to start (pid %d): %v", pid, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "diffmil: serving at %s (pid %d)\n", url, pid)
+
+		if !*noOpen {
+			if err := browser.OpenURL(url); err != nil {
+				log.Printf("could not open browser: %v", err)
+			}
+		}
+		return
+	}
+
+	// Foreground mode: run the server directly
 	handler := server.New(cfg)
 
 	addr := fmt.Sprintf(":%d", *port)
@@ -59,17 +82,62 @@ func main() {
 		srv.Shutdown(context.Background())
 	}()
 
-	fmt.Printf("diffmil running at %s\n", url)
-
-	if !*noOpen {
-		if err := browser.OpenURL(url); err != nil {
-			log.Printf("could not open browser: %v", err)
-		}
-	}
-
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// spawnBackground re-executes the binary with --foreground and detaches it.
+func spawnBackground(port int, noOpen bool) (int, error) {
+	binPath, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("cannot find binary: %w", err)
+	}
+
+	args := []string{
+		"--port", fmt.Sprintf("%d", port),
+		"--foreground",
+		"--no-open",
+	}
+	// Pass through remaining args (git diff arguments)
+	args = append(args, flag.Args()...)
+
+	cmd := exec.Command(binPath, args...)
+	// Inherit stdin for pipe mode
+	if isStdinPipe() {
+		cmd.Stdin = os.Stdin
+	}
+	setSysProcAttr(cmd)
+
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("failed to start background process: %w", err)
+	}
+
+	pid := cmd.Process.Pid
+	// Release so the child survives parent exit
+	if err := cmd.Process.Release(); err != nil {
+		log.Printf("warning: failed to release process: %v", err)
+	}
+
+	return pid, nil
+}
+
+// waitForReady polls the server status endpoint until it responds or times out.
+func waitForReady(baseURL string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(baseURL + "/_/api/status")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("server did not become ready within %s", timeout)
 }
 
 // probeServer checks if a diffmil server is already running at the given URL.
@@ -120,7 +188,6 @@ func buildConfig(ctx context.Context, args []string) (server.Config, error) {
 	return cfg, nil
 }
 
-// getDiffReader returns an io.Reader for the diff content and populates config.
 func getDiffReader(ctx context.Context, args []string, cfg *server.Config) (io.Reader, error) {
 	if isStdinPipe() {
 		return os.Stdin, nil
