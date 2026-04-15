@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { GitCommitHorizontal } from "lucide-react";
+
+const ANIMATION_MS = 300;
+const AUTO_DISMISS_MS = 5000;
 
 interface ToastProps {
   message: string;
@@ -10,17 +13,19 @@ interface ToastProps {
 export function Toast({ message, visible, onDismiss }: ToastProps) {
   const [show, setShow] = useState(false);
 
+  const dismiss = useCallback(() => {
+    setShow(false);
+    setTimeout(onDismiss, ANIMATION_MS);
+  }, [onDismiss]);
+
   useEffect(() => {
     if (visible) {
       setShow(true);
-      const timer = setTimeout(() => {
-        setShow(false);
-        setTimeout(onDismiss, 300);
-      }, 5000);
+      const timer = setTimeout(dismiss, AUTO_DISMISS_MS);
       return () => clearTimeout(timer);
     }
     setShow(false);
-  }, [visible, onDismiss]);
+  }, [visible, dismiss]);
 
   if (!visible && !show) return null;
 
@@ -33,10 +38,7 @@ export function Toast({ message, visible, onDismiss }: ToastProps) {
       <GitCommitHorizontal size={16} className="text-gh-accent shrink-0" />
       <span>{message}</span>
       <button
-        onClick={() => {
-          setShow(false);
-          setTimeout(onDismiss, 300);
-        }}
+        onClick={dismiss}
         className="ml-2 text-gh-text-muted hover:text-gh-text-primary"
       >
         &times;

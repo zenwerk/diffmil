@@ -60,8 +60,10 @@ func (gw *GitWatcher) loop() {
 	fire := func() {
 		if debounceTimer != nil {
 			debounceTimer.Stop()
+			debounceTimer.Reset(debounceDelay)
+		} else {
+			debounceTimer = time.AfterFunc(debounceDelay, gw.onChange)
 		}
-		debounceTimer = time.AfterFunc(debounceDelay, gw.onChange)
 	}
 
 	for {
@@ -90,23 +92,16 @@ func isGitStateChange(event fsnotify.Event) bool {
 
 	name := filepath.Base(event.Name)
 
-	// HEAD changed (checkout, commit, rebase)
 	if name == "HEAD" {
 		return true
 	}
 
-	// Index changed (staging area)
-	if name == "index" {
-		return true
-	}
-
-	// COMMIT_EDITMSG written during commit
 	if name == "COMMIT_EDITMSG" {
 		return true
 	}
 
 	// refs/heads/<branch> updated (new commit pushed/created)
-	if strings.Contains(event.Name, "refs") {
+	if strings.Contains(event.Name, filepath.Join("refs", "heads")) {
 		return true
 	}
 

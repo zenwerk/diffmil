@@ -58,18 +58,26 @@ function AppContent() {
     });
   }, []);
 
-  useEffect(() => {
-    Promise.all([
-      fetch("/_/api/diff").then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<DiffResponse>;
-      }),
+  const fetchCommits = useCallback(
+    () =>
       fetch("/_/api/commits")
         .then((res) => {
           if (!res.ok) return [] as Commit[];
           return res.json() as Promise<Commit[]>;
         })
         .catch(() => [] as Commit[]),
+    [],
+  );
+
+  const dismissToast = useCallback(() => setToastMessage(null), []);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/_/api/diff").then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<DiffResponse>;
+      }),
+      fetchCommits(),
     ])
       .then(([diff, commitList]) => {
         setDiffData(diff);
@@ -80,7 +88,7 @@ function AppContent() {
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [fetchCommits]);
 
   useEffect(() => {
     const es = new EventSource("/_/events");
@@ -99,16 +107,10 @@ function AppContent() {
     });
 
     es.addEventListener("commits-changed", () => {
-      fetch("/_/api/commits")
-        .then((res) => {
-          if (!res.ok) return [] as Commit[];
-          return res.json() as Promise<Commit[]>;
-        })
-        .then((commitList) => {
-          setCommits(commitList);
-          setToastMessage("New commits detected");
-        })
-        .catch(() => {});
+      fetchCommits().then((commitList) => {
+        setCommits(commitList);
+        setToastMessage("New commits detected");
+      });
     });
 
     es.onerror = () => {};
@@ -227,7 +229,7 @@ function AppContent() {
       <Toast
         message={toastMessage ?? ""}
         visible={toastMessage !== null}
-        onDismiss={() => setToastMessage(null)}
+        onDismiss={dismissToast}
       />
     </div>
   );
