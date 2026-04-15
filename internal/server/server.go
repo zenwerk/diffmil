@@ -32,13 +32,24 @@ type State struct {
 
 	subMu       sync.RWMutex
 	subscribers map[chan string]struct{}
+
+	shutdownCh chan struct{}
+	restartCh  chan struct{}
 }
+
+// ShutdownCh returns a channel that is closed when a shutdown is requested.
+func (s *State) ShutdownCh() <-chan struct{} { return s.shutdownCh }
+
+// RestartCh returns a channel that is closed when a restart is requested.
+func (s *State) RestartCh() <-chan struct{} { return s.restartCh }
 
 func newState(cfg Config) *State {
 	return &State{
 		currentDiff: cfg.InitialDiff,
 		repoDir:     cfg.RepoDir,
 		subscribers: make(map[chan string]struct{}),
+		shutdownCh:  make(chan struct{}),
+		restartCh:   make(chan struct{}),
 	}
 }
 
@@ -83,7 +94,8 @@ func (s *State) notify(event string) {
 }
 
 // New creates an HTTP handler that serves the diff API and embedded SPA.
-func New(cfg Config) http.Handler {
+// It returns both the handler and the State (for shutdown/restart signaling).
+func New(cfg Config) (http.Handler, *State) {
 	state := newState(cfg)
 	mux := http.NewServeMux()
 
@@ -91,10 +103,12 @@ func New(cfg Config) http.Handler {
 	mux.HandleFunc("POST /_/api/diff", handlePostDiff(state))
 	mux.HandleFunc("GET /_/api/commits", handleCommits(state))
 	mux.HandleFunc("GET /_/api/status", handleStatus())
+	mux.HandleFunc("POST /_/api/shutdown", handleShutdown(state))
+	mux.HandleFunc("POST /_/api/restart", handleRestart(state))
 	mux.HandleFunc("GET /_/events", handleSSE(state))
 	mux.HandleFunc("GET /", handleSPA())
 
-	return mux
+	return mux, state
 }
 
 // workingTreeHash is the special hash used for uncommitted changes.
@@ -197,6 +211,34 @@ func handleStatus() http.HandlerFunc {
 			"status": "ok",
 			"pid":    os.Getpid(),
 		})
+	}
+}
+
+func handleShutdown(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"ok":true}`))
+		// Signal shutdown after response is sent
+		go func() {
+			select {
+			case state.shutdownCh <- struct{}{}:
+			default:
+			}
+		}()
+	}
+}
+
+func handleRestart(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"ok":true}`))
+		// Signal restart after response is sent
+		go func() {
+			select {
+			case state.restartCh <- struct{}{}:
+			default:
+			}
+		}()
 	}
 }
 

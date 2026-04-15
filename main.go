@@ -25,7 +25,26 @@ func main() {
 	port := flag.Int("port", 8080, "server port")
 	noOpen := flag.Bool("no-open", false, "don't open browser")
 	foreground := flag.Bool("foreground", false, "run server in foreground (don't daemonize)")
+	doStatus := flag.Bool("status", false, "show status of running server")
+	doShutdown := flag.Bool("shutdown", false, "shut down the running server")
+	doRestart := flag.Bool("restart", false, "restart the running server")
 	flag.Parse()
+
+	url := fmt.Sprintf("http://localhost:%d", *port)
+
+	// Handle control commands first (no diff parsing needed)
+	if *doStatus {
+		runStatus(url)
+		return
+	}
+	if *doShutdown {
+		runShutdown(url)
+		return
+	}
+	if *doRestart {
+		runRestart(url)
+		return
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -34,8 +53,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	url := fmt.Sprintf("http://localhost:%d", *port)
 
 	// Check if a server is already running on this port
 	if probeServer(url) {
@@ -51,12 +68,11 @@ func main() {
 
 	// If not foreground mode, spawn a child process and exit
 	if !*foreground {
-		pid, err := spawnBackground(*port, *noOpen)
+		pid, err := spawnBackground(*port)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		// Wait for child to be ready
 		if err := waitForReady(url, 10*time.Second); err != nil {
 			log.Fatalf("server failed to start (pid %d): %v", pid, err)
 		}
@@ -72,23 +88,128 @@ func main() {
 	}
 
 	// Foreground mode: run the server directly
-	handler := server.New(cfg)
+	runForeground(ctx, cancel, cfg, *port)
+}
 
-	addr := fmt.Sprintf(":%d", *port)
+func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int) {
+	handler, state := server.New(cfg)
+
+	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: handler}
 
+	// Graceful shutdown helper
+	shutdown := func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		srv.Shutdown(shutdownCtx)
+	}
+
+	restartRequested := false
+
 	go func() {
-		<-ctx.Done()
-		srv.Shutdown(context.Background())
+		select {
+		case <-ctx.Done():
+			shutdown()
+		case <-state.ShutdownCh():
+			shutdown()
+		case <-state.RestartCh():
+			restartRequested = true
+			shutdown()
+		}
 	}()
 
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+
+	if restartRequested {
+		// Small delay to ensure port is released
+		time.Sleep(200 * time.Millisecond)
+
+		binPath, err := os.Executable()
+		if err != nil {
+			log.Fatalf("restart: cannot find binary: %v", err)
+		}
+		cwd, _ := os.Getwd()
+		args := []string{"--port", fmt.Sprintf("%d", port), "--foreground", "--no-open"}
+		cmd := exec.Command(binPath, args...)
+		cmd.Dir = cwd
+		setSysProcAttr(cmd)
+		if err := cmd.Start(); err != nil {
+			log.Fatalf("restart: failed to start new process: %v", err)
+		}
+		cmd.Process.Release()
+	}
 }
 
-// spawnBackground re-executes the binary with --foreground and detaches it.
-func spawnBackground(port int, noOpen bool) (int, error) {
+// --- Control commands ---
+
+func runStatus(url string) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url + "/_/api/status")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: no server running at %s\n", url)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	var status struct {
+		Status string `json:"status"`
+		PID    int    `json:"pid"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: failed to read status: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, status.PID, status.Status)
+}
+
+func runShutdown(url string) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post(url+"/_/api/shutdown", "application/json", nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: no server running at %s\n", url)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		fmt.Fprintf(os.Stderr, "diffmil: unexpected response: %s\n", resp.Status)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "diffmil: shutdown request sent to %s\n", url)
+}
+
+func runRestart(url string) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post(url+"/_/api/restart", "application/json", nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: no server running at %s\n", url)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		fmt.Fprintf(os.Stderr, "diffmil: unexpected response: %s\n", resp.Status)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "diffmil: restart request sent to %s\n", url)
+
+	// Wait for new server to come up
+	time.Sleep(500 * time.Millisecond)
+	if err := waitForReady(url, 10*time.Second); err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: warning: new server did not come up: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "diffmil: server restarted at %s\n", url)
+	}
+}
+
+// --- Background spawning ---
+
+func spawnBackground(port int) (int, error) {
 	binPath, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("cannot find binary: %w", err)
@@ -99,11 +220,9 @@ func spawnBackground(port int, noOpen bool) (int, error) {
 		"--foreground",
 		"--no-open",
 	}
-	// Pass through remaining args (git diff arguments)
 	args = append(args, flag.Args()...)
 
 	cmd := exec.Command(binPath, args...)
-	// Inherit stdin for pipe mode
 	if isStdinPipe() {
 		cmd.Stdin = os.Stdin
 	}
@@ -114,7 +233,6 @@ func spawnBackground(port int, noOpen bool) (int, error) {
 	}
 
 	pid := cmd.Process.Pid
-	// Release so the child survives parent exit
 	if err := cmd.Process.Release(); err != nil {
 		log.Printf("warning: failed to release process: %v", err)
 	}
@@ -122,7 +240,6 @@ func spawnBackground(port int, noOpen bool) (int, error) {
 	return pid, nil
 }
 
-// waitForReady polls the server status endpoint until it responds or times out.
 func waitForReady(baseURL string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
@@ -140,7 +257,6 @@ func waitForReady(baseURL string, timeout time.Duration) error {
 	return fmt.Errorf("server did not become ready within %s", timeout)
 }
 
-// probeServer checks if a diffmil server is already running at the given URL.
 func probeServer(baseURL string) bool {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	resp, err := client.Get(baseURL + "/_/api/status")
@@ -151,7 +267,6 @@ func probeServer(baseURL string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// postDiff sends diff data to an existing server via POST.
 func postDiff(baseURL string, diffResp *diff.DiffResponse) error {
 	data, err := json.Marshal(diffResp)
 	if err != nil {
@@ -170,6 +285,8 @@ func postDiff(baseURL string, diffResp *diff.DiffResponse) error {
 	}
 	return nil
 }
+
+// --- Config building ---
 
 func buildConfig(ctx context.Context, args []string) (server.Config, error) {
 	var cfg server.Config
