@@ -1,20 +1,88 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+
+	"github.com/bluekeyes/go-gitdiff/gitdiff"
+	"github.com/pkg/browser"
+	"github.com/zenwerk/diffmil/internal/diff"
+	gitcmd "github.com/zenwerk/diffmil/internal/git"
+	"github.com/zenwerk/diffmil/internal/server"
 )
 
-//TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
-// the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
 func main() {
-	//TIP <p>Press <shortcut actionId="ShowIntentionActions"/> when your caret is at the underlined text
-	// to see how GoLand suggests fixing the warning.</p><p>Alternatively, if available, click the lightbulb to view possible fixes.</p>
-	s := "gopher"
-	fmt.Println("Hello and welcome, %s!", s)
+	port := flag.Int("port", 8080, "server port")
+	noOpen := flag.Bool("no-open", false, "don't open browser")
+	flag.Parse()
 
-	for i := 1; i <= 5; i++ {
-		//TIP <p>To start your debugging session, right-click your code in the editor and select the Debug option.</p> <p>We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-		// for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.</p>
-		fmt.Println("i =", 100/i)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	reader, err := getDiffReader(ctx, flag.Args())
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	files, _, err := gitdiff.Parse(reader)
+	if err != nil {
+		log.Fatalf("failed to parse diff: %v", err)
+	}
+
+	diffResp := diff.FromGitDiff(files)
+	handler := server.New(diffResp)
+
+	addr := fmt.Sprintf(":%d", *port)
+	srv := &http.Server{Addr: addr, Handler: handler}
+
+	go func() {
+		<-ctx.Done()
+		srv.Shutdown(context.Background())
+	}()
+
+	url := fmt.Sprintf("http://localhost:%d", *port)
+	fmt.Printf("diffmil running at %s\n", url)
+
+	if !*noOpen {
+		if err := browser.OpenURL(url); err != nil {
+			log.Printf("could not open browser: %v", err)
+		}
+	}
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+}
+
+// getDiffReader returns an io.Reader for the diff content.
+// If stdin is a pipe, reads from stdin. Otherwise runs git diff.
+func getDiffReader(ctx context.Context, args []string) (io.Reader, error) {
+	if isStdinPipe() {
+		return os.Stdin, nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	if !gitcmd.IsGitRepo(cwd) {
+		return nil, fmt.Errorf("not a git repository: %s", cwd)
+	}
+
+	return gitcmd.Diff(ctx, cwd, args)
+}
+
+func isStdinPipe() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice == 0
 }
