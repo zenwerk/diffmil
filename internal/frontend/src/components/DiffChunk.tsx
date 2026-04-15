@@ -1,11 +1,13 @@
+import type { ThemedToken } from "shiki";
 import type { DiffChunk as DiffChunkType } from "../types";
 import { DiffLineRow } from "./DiffLineRow";
 
 interface DiffChunkProps {
   chunk: DiffChunkType;
+  lineTokens?: (ThemedToken[] | undefined)[];
 }
 
-export function DiffChunk({ chunk }: DiffChunkProps) {
+export function DiffChunk({ chunk, lineTokens }: DiffChunkProps) {
   return (
     <>
       <tr className="bg-gh-bg-tertiary">
@@ -17,7 +19,7 @@ export function DiffChunk({ chunk }: DiffChunkProps) {
         </td>
       </tr>
       {chunk.lines.map((line, i) => (
-        <DiffLineRow key={i} line={line} />
+        <DiffLineRow key={i} line={line} tokens={lineTokens?.[i]} />
       ))}
     </>
   );

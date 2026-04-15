@@ -1,8 +1,12 @@
+import { useMemo } from "react";
+import type { ThemedToken } from "shiki";
 import type { DiffFile } from "../types";
 import { DiffChunk } from "./DiffChunk";
+import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 
 interface DiffViewerProps {
   file: DiffFile;
+  shikiTheme: string;
 }
 
 const statusBadge: Record<string, { label: string; className: string }> = {
@@ -12,8 +16,39 @@ const statusBadge: Record<string, { label: string; className: string }> = {
   renamed: { label: "R", className: "text-purple-400" },
 };
 
-export function DiffViewer({ file }: DiffViewerProps) {
+export function DiffViewer({ file, shikiTheme }: DiffViewerProps) {
   const badge = statusBadge[file.status] ?? statusBadge.modified;
+  const { ready, highlightLines } = useHighlighter();
+
+  // Collect all line contents and highlight them in one shot
+  const allLineTokens = useMemo(() => {
+    if (!ready || file.chunks.length === 0) return null;
+
+    const lang = detectLanguage(file.path);
+    const allLines: string[] = [];
+
+    for (const chunk of file.chunks) {
+      for (const line of chunk.lines) {
+        allLines.push(line.content);
+      }
+    }
+
+    const tokens = highlightLines(allLines, lang, shikiTheme);
+    if (tokens.length === 0) return null;
+
+    // Distribute tokens back to chunks
+    const result: (ThemedToken[] | undefined)[][] = [];
+    let idx = 0;
+    for (const chunk of file.chunks) {
+      const chunkTokens: (ThemedToken[] | undefined)[] = [];
+      for (let i = 0; i < chunk.lines.length; i++) {
+        chunkTokens.push(tokens[idx] ?? undefined);
+        idx++;
+      }
+      result.push(chunkTokens);
+    }
+    return result;
+  }, [ready, file, shikiTheme, highlightLines]);
 
   return (
     <div
@@ -60,7 +95,11 @@ export function DiffViewer({ file }: DiffViewerProps) {
           <table className="w-full border-collapse">
             <tbody>
               {file.chunks.map((chunk, i) => (
-                <DiffChunk key={i} chunk={chunk} />
+                <DiffChunk
+                  key={i}
+                  chunk={chunk}
+                  lineTokens={allLineTokens?.[i]}
+                />
               ))}
             </tbody>
           </table>

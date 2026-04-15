@@ -1,10 +1,12 @@
+import type { ThemedToken } from "shiki";
 import type { DiffLine } from "../types";
 
 interface DiffLineRowProps {
   line: DiffLine;
+  tokens?: ThemedToken[];
 }
 
-export function DiffLineRow({ line }: DiffLineRowProps) {
+export function DiffLineRow({ line, tokens }: DiffLineRowProps) {
   const bgClass =
     line.type === "add"
       ? "bg-diff-addition-bg"
@@ -34,7 +36,15 @@ export function DiffLineRow({ line }: DiffLineRowProps) {
         className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${borderClass}`}
       >
         <span className="text-gh-text-muted select-none">{prefix}</span>
-        {line.content}
+        {tokens && tokens.length > 0 ? (
+          tokens.map((token, i) => (
+            <span key={i} style={{ color: token.color }}>
+              {token.content}
+            </span>
+          ))
+        ) : (
+          line.content
+        )}
       </td>
     </tr>
   );

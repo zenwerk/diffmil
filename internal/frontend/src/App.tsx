@@ -4,8 +4,10 @@ import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
 import { DiffViewer } from "./components/DiffViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { HighlighterProvider } from "./hooks/useHighlighter";
+import { useTheme } from "./hooks/useTheme";
 
-export function App() {
+function AppContent() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [commits, setCommits] = useState<Commit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
@@ -13,6 +15,7 @@ export function App() {
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasCommits, setHasCommits] = useState(false);
+  const { shikiTheme } = useTheme();
 
   // Load initial diff and commit list
   useEffect(() => {
@@ -127,11 +130,19 @@ export function App() {
             </div>
           ) : (
             files.map((file) => (
-              <DiffViewer key={file.path} file={file} />
+              <DiffViewer key={file.path} file={file} shikiTheme={shikiTheme} />
             ))
           )}
         </main>
       </div>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <HighlighterProvider>
+      <AppContent />
+    </HighlighterProvider>
   );
 }

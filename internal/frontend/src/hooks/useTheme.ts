@@ -33,26 +33,38 @@ function loadStoredMode(): ThemeMode {
 
 export function useTheme() {
   const [mode, setModeState] = useState<ThemeMode>(loadStoredMode);
+  const [resolved, setResolved] = useState<ResolvedTheme>(
+    resolveTheme(loadStoredMode()),
+  );
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode);
     localStorage.setItem(STORAGE_KEY, newMode);
-    applyTheme(resolveTheme(newMode));
+    const r = resolveTheme(newMode);
+    applyTheme(r);
+    setResolved(r);
   }, []);
 
   // Apply theme on mount and listen for system theme changes
   useEffect(() => {
-    applyTheme(resolveTheme(mode));
+    const r = resolveTheme(mode);
+    applyTheme(r);
+    setResolved(r);
 
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
       if (mode === "system") {
-        applyTheme(getSystemTheme());
+        const sys = getSystemTheme();
+        applyTheme(sys);
+        setResolved(sys);
       }
     };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, [mode]);
 
-  return { mode, setMode };
+  // shiki theme name corresponding to current resolved theme
+  const shikiTheme = resolved === "dark" ? "github-dark" : "github-light";
+
+  return { mode, setMode, resolved, shikiTheme };
 }
