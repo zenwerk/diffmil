@@ -1,0 +1,41 @@
+import type { DiffLine } from "../types";
+
+interface DiffLineRowProps {
+  line: DiffLine;
+}
+
+export function DiffLineRow({ line }: DiffLineRowProps) {
+  const bgClass =
+    line.type === "add"
+      ? "bg-diff-addition-bg"
+      : line.type === "delete"
+        ? "bg-diff-deletion-bg"
+        : "";
+
+  const borderClass =
+    line.type === "add"
+      ? "border-l-2 border-diff-addition-border"
+      : line.type === "delete"
+        ? "border-l-2 border-diff-deletion-border"
+        : "border-l-2 border-transparent";
+
+  const prefix =
+    line.type === "add" ? "+" : line.type === "delete" ? "-" : " ";
+
+  return (
+    <tr className={`${bgClass} hover:brightness-125`}>
+      <td className="w-[1%] min-w-[50px] px-2 text-right text-github-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
+        {line.oldLineNumber ?? ""}
+      </td>
+      <td className="w-[1%] min-w-[50px] px-2 text-right text-github-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
+        {line.newLineNumber ?? ""}
+      </td>
+      <td
+        className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${borderClass}`}
+      >
+        <span className="text-github-text-muted select-none">{prefix}</span>
+        {line.content}
+      </td>
+    </tr>
+  );
+}
