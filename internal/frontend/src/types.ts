@@ -27,3 +27,11 @@ export interface DiffLine {
   oldLineNumber?: number;
   newLineNumber?: number;
 }
+
+export interface Commit {
+  hash: string;
+  short: string;
+  subject: string;
+  author: string;
+  date: string;
+}

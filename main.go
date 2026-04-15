@@ -25,18 +25,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	reader, err := getDiffReader(ctx, flag.Args())
+	cfg, err := buildConfig(ctx, flag.Args())
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	files, _, err := gitdiff.Parse(reader)
-	if err != nil {
-		log.Fatalf("failed to parse diff: %v", err)
-	}
-
-	diffResp := diff.FromGitDiff(files)
-	handler := server.New(diffResp)
+	handler := server.New(cfg)
 
 	addr := fmt.Sprintf(":%d", *port)
 	srv := &http.Server{Addr: addr, Handler: handler}
@@ -60,9 +54,25 @@ func main() {
 	}
 }
 
-// getDiffReader returns an io.Reader for the diff content.
-// If stdin is a pipe, reads from stdin. Otherwise runs git diff.
-func getDiffReader(ctx context.Context, args []string) (io.Reader, error) {
+func buildConfig(ctx context.Context, args []string) (server.Config, error) {
+	var cfg server.Config
+
+	reader, err := getDiffReader(ctx, args, &cfg)
+	if err != nil {
+		return cfg, err
+	}
+
+	files, _, err := gitdiff.Parse(reader)
+	if err != nil {
+		return cfg, fmt.Errorf("failed to parse diff: %w", err)
+	}
+
+	cfg.InitialDiff = diff.FromGitDiff(files)
+	return cfg, nil
+}
+
+// getDiffReader returns an io.Reader for the diff content and populates config.
+func getDiffReader(ctx context.Context, args []string, cfg *server.Config) (io.Reader, error) {
 	if isStdinPipe() {
 		return os.Stdin, nil
 	}
@@ -76,6 +86,7 @@ func getDiffReader(ctx context.Context, args []string) (io.Reader, error) {
 		return nil, fmt.Errorf("not a git repository: %s", cwd)
 	}
 
+	cfg.RepoDir = cwd
 	return gitcmd.Diff(ctx, cwd, args)
 }
 
