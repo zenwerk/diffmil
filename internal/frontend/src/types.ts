@@ -28,6 +28,8 @@ export interface DiffLine {
   newLineNumber?: number;
 }
 
+export type DiffViewMode = "unified" | "split";
+
 export interface Commit {
   hash: string;
   short: string;

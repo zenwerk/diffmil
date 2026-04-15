@@ -1,11 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
-import type { DiffResponse, Commit } from "./types";
+import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
 import { DiffViewer } from "./components/DiffViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { ViewModeToggle } from "./components/ViewModeToggle";
 import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme } from "./hooks/useTheme";
+
+const VIEW_MODE_KEY = "diffmil.viewMode";
+
+function loadViewMode(): DiffViewMode {
+  try {
+    const stored = localStorage.getItem(VIEW_MODE_KEY);
+    if (stored === "unified" || stored === "split") return stored;
+  } catch {
+    // ignore
+  }
+  return "unified";
+}
 
 function AppContent() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
@@ -15,7 +28,13 @@ function AppContent() {
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasCommits, setHasCommits] = useState(false);
+  const [viewMode, setViewModeState] = useState<DiffViewMode>(loadViewMode);
   const { shikiTheme } = useTheme();
+
+  const setViewMode = useCallback((mode: DiffViewMode) => {
+    setViewModeState(mode);
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+  }, []);
 
   // Load initial diff and commit list
   useEffect(() => {
@@ -82,16 +101,17 @@ function AppContent() {
   return (
     <div className="h-screen flex flex-col">
       {/* Header */}
-      <header className="bg-gh-bg-secondary border-b border-gh-border px-4 py-2 flex items-center shrink-0">
+      <header className="bg-gh-bg-secondary border-b border-gh-border px-4 py-2 flex items-center gap-3 shrink-0">
         <h1 className="text-sm font-semibold text-gh-text-primary">
           diffmil
         </h1>
         {selectedCommit && (
-          <span className="ml-3 font-mono text-xs text-gh-text-muted">
+          <span className="font-mono text-xs text-gh-text-muted">
             {selectedCommit.slice(0, 7)}
           </span>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <ViewModeToggle mode={viewMode} onChange={setViewMode} />
           <ThemeToggle />
         </div>
       </header>
@@ -130,7 +150,12 @@ function AppContent() {
             </div>
           ) : (
             files.map((file) => (
-              <DiffViewer key={file.path} file={file} shikiTheme={shikiTheme} />
+              <DiffViewer
+                key={file.path}
+                file={file}
+                shikiTheme={shikiTheme}
+                viewMode={viewMode}
+              />
             ))
           )}
         </main>

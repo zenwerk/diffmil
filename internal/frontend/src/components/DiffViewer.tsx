@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import type { ThemedToken } from "shiki";
-import type { DiffFile } from "../types";
+import type { DiffFile, DiffViewMode } from "../types";
 import { DiffChunk } from "./DiffChunk";
+import { SplitDiffChunk } from "./SplitDiffChunk";
 import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 
 interface DiffViewerProps {
   file: DiffFile;
   shikiTheme: string;
+  viewMode: DiffViewMode;
 }
 
 const statusBadge: Record<string, { label: string; className: string }> = {
@@ -16,7 +18,7 @@ const statusBadge: Record<string, { label: string; className: string }> = {
   renamed: { label: "R", className: "text-purple-400" },
 };
 
-export function DiffViewer({ file, shikiTheme }: DiffViewerProps) {
+export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
   const badge = statusBadge[file.status] ?? statusBadge.modified;
   const { ready, highlightLines } = useHighlighter();
 
@@ -49,6 +51,8 @@ export function DiffViewer({ file, shikiTheme }: DiffViewerProps) {
     }
     return result;
   }, [ready, file, shikiTheme, highlightLines]);
+
+  const ChunkComponent = viewMode === "split" ? SplitDiffChunk : DiffChunk;
 
   return (
     <div
@@ -92,10 +96,20 @@ export function DiffViewer({ file, shikiTheme }: DiffViewerProps) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
+          <table
+            className={`border-collapse ${viewMode === "split" ? "w-full table-fixed" : "w-full"}`}
+          >
+            {viewMode === "split" && (
+              <colgroup>
+                <col style={{ width: "40px" }} />
+                <col style={{ width: "50%" }} />
+                <col style={{ width: "40px" }} />
+                <col style={{ width: "50%" }} />
+              </colgroup>
+            )}
             <tbody>
               {file.chunks.map((chunk, i) => (
-                <DiffChunk
+                <ChunkComponent
                   key={i}
                   chunk={chunk}
                   lineTokens={allLineTokens?.[i]}
