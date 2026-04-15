@@ -20,6 +20,7 @@ import (
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
 	"github.com/zenwerk/diffmil/internal/pidfile"
 	"github.com/zenwerk/diffmil/internal/server"
+	"github.com/zenwerk/diffmil/internal/watcher"
 )
 
 func main() {
@@ -136,11 +137,22 @@ func portExplicitlySet() bool {
 func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int) {
 	handler, state := server.New(cfg)
 
-	// Write PID file
 	if err := pidfile.Write(port); err != nil {
 		log.Printf("warning: failed to write PID file: %v", err)
 	}
 	defer pidfile.Remove(port)
+
+	// Watch git repository for changes
+	if cfg.RepoDir != "" {
+		gw, err := watcher.New(cfg.RepoDir, func() {
+			state.NotifyCommitsChanged()
+		})
+		if err != nil {
+			log.Printf("warning: failed to start git watcher: %v", err)
+		} else {
+			defer gw.Close()
+		}
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: handler}

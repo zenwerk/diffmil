@@ -55,6 +55,11 @@ func (s *State) UpdateDiff(resp *diff.DiffResponse) {
 	s.notify("update")
 }
 
+// NotifyCommitsChanged sends a commits-changed event to all SSE subscribers.
+func (s *State) NotifyCommitsChanged() {
+	s.notify("commits-changed")
+}
+
 func (s *State) getDiff() *diff.DiffResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

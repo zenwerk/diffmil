@@ -6,6 +6,7 @@ import { FileList } from "./components/FileList";
 import { DiffViewer } from "./components/DiffViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ViewModeToggle } from "./components/ViewModeToggle";
+import { Toast } from "./components/Toast";
 import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme } from "./hooks/useTheme";
 
@@ -41,6 +42,7 @@ function AppContent() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewModeState] = useState<DiffViewMode>(loadViewMode);
   const [commitsPanelOpen, setCommitsPanelOpenState] = useState(loadCommitsPanelOpen);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const { shikiTheme } = useTheme();
 
   const setViewMode = useCallback((mode: DiffViewMode) => {
@@ -92,6 +94,19 @@ function AppContent() {
         .then((data) => {
           setDiffData(data);
           setSelectedCommit(null);
+        })
+        .catch(() => {});
+    });
+
+    es.addEventListener("commits-changed", () => {
+      fetch("/_/api/commits")
+        .then((res) => {
+          if (!res.ok) return [] as Commit[];
+          return res.json() as Promise<Commit[]>;
+        })
+        .then((commitList) => {
+          setCommits(commitList);
+          setToastMessage("New commits detected");
         })
         .catch(() => {});
     });
@@ -208,6 +223,12 @@ function AppContent() {
           )}
         </main>
       </div>
+
+      <Toast
+        message={toastMessage ?? ""}
+        visible={toastMessage !== null}
+        onDismiss={() => setToastMessage(null)}
+      />
     </div>
   );
 }
