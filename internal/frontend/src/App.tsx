@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -60,6 +60,36 @@ function AppContent() {
         setError(err.message);
         setLoading(false);
       });
+  }, []);
+
+  // Subscribe to SSE for live updates (when another diffmil instance posts new diff)
+  const selectedCommitRef = useRef(selectedCommit);
+  selectedCommitRef.current = selectedCommit;
+
+  useEffect(() => {
+    const es = new EventSource("/_/events");
+
+    es.addEventListener("update", () => {
+      // Re-fetch current diff (ignore commit selection — new diff was pushed)
+      fetch("/_/api/diff")
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json() as Promise<DiffResponse>;
+        })
+        .then((data) => {
+          setDiffData(data);
+          setSelectedCommit(null);
+        })
+        .catch(() => {
+          // silently ignore
+        });
+    });
+
+    es.onerror = () => {
+      // EventSource auto-reconnects
+    };
+
+    return () => es.close();
   }, []);
 
   const handleSelectCommit = useCallback((hash: string) => {
