@@ -1,6 +1,7 @@
 import type { ThemedToken } from "shiki";
 import type { DiffLine } from "../types";
 import { TokenizedCode } from "./TokenizedCode";
+import { LINE_PREFIX } from "../constants/diff";
 
 interface DiffLineRowProps {
   line: DiffLine;
@@ -15,12 +16,6 @@ const LINE_BG: Record<string, string> = {
 const LINE_BORDER: Record<string, string> = {
   add: "border-l-2 border-diff-addition-border",
   delete: "border-l-2 border-diff-deletion-border",
-};
-
-const LINE_PREFIX: Record<string, string> = {
-  add: "+",
-  delete: "-",
-  normal: " ",
 };
 
 export function DiffLineRow({ line, tokens }: DiffLineRowProps) {

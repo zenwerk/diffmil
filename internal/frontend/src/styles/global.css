@@ -22,7 +22,7 @@ html[data-theme="dark"] {
 
   --color-diff-add-line-hover: #122d17;
   --color-diff-del-line-hover: #3d0a0a;
-  --color-line-hover: #161b22;
+  --color-normal-line-hover: #161b22;
 
   --color-link: #58a6ff;
 }
@@ -47,7 +47,7 @@ html[data-theme="light"] {
 
   --color-diff-add-line-hover: #ccffd8;
   --color-diff-del-line-hover: #ffd7d5;
-  --color-line-hover: #f0f2f5;
+  --color-normal-line-hover: #f0f2f5;
 
   --color-link: #0969da;
 }
@@ -73,7 +73,7 @@ html[data-theme="light"] {
   --color-diff-neutral-bg: var(--color-diff-neutral-bg);
   --color-diff-add-hover: var(--color-diff-add-line-hover);
   --color-diff-del-hover: var(--color-diff-del-line-hover);
-  --color-line-hover: var(--color-line-hover);
+  --color-line-hover: var(--color-normal-line-hover);
 
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;

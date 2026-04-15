@@ -32,9 +32,10 @@ function loadStoredMode(): ThemeMode {
 }
 
 export function useTheme() {
-  const [mode, setModeState] = useState<ThemeMode>(loadStoredMode);
+  const initialMode = loadStoredMode();
+  const [mode, setModeState] = useState<ThemeMode>(initialMode);
   const [resolved, setResolved] = useState<ResolvedTheme>(() =>
-    resolveTheme(loadStoredMode()),
+    resolveTheme(initialMode),
   );
 
   const setMode = useCallback((newMode: ThemeMode) => {

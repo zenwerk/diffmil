@@ -172,13 +172,29 @@ func handleCommits(state *State) http.HandlerFunc {
 
 		ctx := r.Context()
 
-		commits, err := gitcmd.Log(ctx, state.repoDir, 50)
-		if err != nil {
+		var (
+			commits        []gitcmd.Commit
+			hasUncommitted bool
+			logErr         error
+			wg             sync.WaitGroup
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			commits, logErr = gitcmd.Log(ctx, state.repoDir, 50)
+		}()
+		go func() {
+			defer wg.Done()
+			hasUncommitted = gitcmd.HasUncommittedChanges(ctx, state.repoDir)
+		}()
+		wg.Wait()
+
+		if logErr != nil {
 			http.Error(w, `{"error":"failed to get commits"}`, http.StatusInternalServerError)
 			return
 		}
 
-		if gitcmd.HasUncommittedChanges(ctx, state.repoDir) {
+		if hasUncommitted {
 			working := gitcmd.Commit{
 				Hash:    workingTreeHash,
 				Short:   "working",
