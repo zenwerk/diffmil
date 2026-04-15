@@ -23,6 +23,29 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `diffmil - AI diff review tool
+
+Usage:
+  diffmil [options] [git-diff-args...]    Start server and view diff in browser
+  diffmil [options] --status              Show running server(s)
+  diffmil [options] --shutdown            Stop server
+  diffmil [options] --restart             Restart server
+  cat patch.diff | diffmil [options]      View diff from stdin
+
+Examples:
+  diffmil                                 View uncommitted changes
+  diffmil HEAD~3..HEAD                    View diff between commits
+  diffmil main..feature-branch            View branch diff
+  diffmil --status                        List all running servers
+  diffmil --shutdown --all                Stop all servers
+  diffmil --port 3000                     Use custom port
+
+Options:
+`)
+		flag.PrintDefaults()
+	}
+
 	port := flag.Int("port", 8080, "server port")
 	noOpen := flag.Bool("no-open", false, "don't open browser")
 	foreground := flag.Bool("foreground", false, "run server in foreground (don't daemonize)")
