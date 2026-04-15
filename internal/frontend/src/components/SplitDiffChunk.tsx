@@ -1,5 +1,6 @@
 import type { ThemedToken } from "shiki";
 import type { DiffChunk, DiffLine } from "../types";
+import { TokenizedCode } from "./TokenizedCode";
 
 interface SplitDiffChunkProps {
   chunk: DiffChunk;
@@ -10,6 +11,17 @@ interface SplitRow {
   left: { line: DiffLine; tokens?: ThemedToken[] } | null;
   right: { line: DiffLine; tokens?: ThemedToken[] } | null;
 }
+
+const LINE_BG: Record<string, string> = {
+  add: "bg-diff-addition-bg",
+  delete: "bg-diff-deletion-bg",
+};
+
+const LINE_PREFIX: Record<string, string> = {
+  add: "+",
+  delete: "-",
+  normal: " ",
+};
 
 function buildSplitRows(
   chunk: DiffChunk,
@@ -29,19 +41,16 @@ function buildSplitRows(
       });
       i++;
     } else if (line.type === "delete") {
-      // Collect consecutive deletes
       const deletes: number[] = [];
       while (i < lines.length && lines[i].type === "delete") {
         deletes.push(i);
         i++;
       }
-      // Collect consecutive adds
       const adds: number[] = [];
       while (i < lines.length && lines[i].type === "add") {
         adds.push(i);
         i++;
       }
-      // Pair them up
       const maxLen = Math.max(deletes.length, adds.length);
       for (let j = 0; j < maxLen; j++) {
         const delIdx = deletes[j];
@@ -58,7 +67,6 @@ function buildSplitRows(
         });
       }
     } else if (line.type === "add") {
-      // Standalone add (no preceding delete)
       rows.push({
         left: null,
         right: { line, tokens: lineTokens?.[i] },
@@ -74,10 +82,8 @@ function buildSplitRows(
 
 function SplitCell({
   side,
-  tokens,
 }: {
   side: { line: DiffLine; tokens?: ThemedToken[] } | null;
-  tokens?: ThemedToken[];
 }) {
   if (!side) {
     return (
@@ -88,40 +94,23 @@ function SplitCell({
     );
   }
 
-  const { line } = side;
-  const effectiveTokens = tokens ?? side.tokens;
-
-  const bgClass =
-    line.type === "add"
-      ? "bg-diff-addition-bg"
-      : line.type === "delete"
-        ? "bg-diff-deletion-bg"
-        : "";
-
+  const { line, tokens } = side;
+  const bg = LINE_BG[line.type] ?? "";
   const lineNum =
     line.type === "delete" ? line.oldLineNumber : line.newLineNumber;
-
-  const prefix =
-    line.type === "add" ? "+" : line.type === "delete" ? "-" : " ";
 
   return (
     <>
       <td
-        className={`w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap ${bgClass}`}
+        className={`w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap ${bg}`}
       >
         {lineNum ?? ""}
       </td>
-      <td
-        className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${bgClass}`}
-      >
-        <span className="text-gh-text-muted select-none">{prefix}</span>
-        {effectiveTokens && effectiveTokens.length > 0
-          ? effectiveTokens.map((token, i) => (
-              <span key={i} style={{ color: token.color }}>
-                {token.content}
-              </span>
-            ))
-          : line.content}
+      <td className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${bg}`}>
+        <span className="text-gh-text-muted select-none">
+          {LINE_PREFIX[line.type] ?? " "}
+        </span>
+        <TokenizedCode tokens={tokens} fallback={line.content} />
       </td>
     </>
   );

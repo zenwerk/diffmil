@@ -4,6 +4,7 @@ import type { DiffFile, DiffViewMode } from "../types";
 import { DiffChunk } from "./DiffChunk";
 import { SplitDiffChunk } from "./SplitDiffChunk";
 import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
+import { STATUS_META } from "../constants/status";
 
 interface DiffViewerProps {
   file: DiffFile;
@@ -11,15 +12,8 @@ interface DiffViewerProps {
   viewMode: DiffViewMode;
 }
 
-const statusBadge: Record<string, { label: string; className: string }> = {
-  modified: { label: "M", className: "text-gh-warning" },
-  added: { label: "A", className: "text-gh-accent" },
-  deleted: { label: "D", className: "text-gh-danger" },
-  renamed: { label: "R", className: "text-purple-400" },
-};
-
 export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
-  const badge = statusBadge[file.status] ?? statusBadge.modified;
+  const meta = STATUS_META[file.status] ?? STATUS_META.modified;
   const { ready, highlightLines } = useHighlighter();
 
   // Collect all line contents and highlight them in one shot
@@ -61,8 +55,8 @@ export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
     >
       {/* File header */}
       <div className="bg-gh-bg-secondary px-4 py-2 flex items-center gap-2 border-b border-gh-border sticky top-0 z-10">
-        <span className={`font-bold text-sm ${badge.className}`}>
-          {badge.label}
+        <span className={`font-bold text-sm ${meta.colorClass}`}>
+          {meta.label}
         </span>
         <span className="font-mono text-sm text-gh-text-primary truncate">
           {file.oldPath ? (

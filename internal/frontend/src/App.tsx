@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -27,7 +27,6 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasCommits, setHasCommits] = useState(false);
   const [viewMode, setViewModeState] = useState<DiffViewMode>(loadViewMode);
   const { shikiTheme } = useTheme();
 
@@ -36,7 +35,6 @@ function AppContent() {
     localStorage.setItem(VIEW_MODE_KEY, mode);
   }, []);
 
-  // Load initial diff and commit list
   useEffect(() => {
     Promise.all([
       fetch("/_/api/diff").then((res) => {
@@ -53,7 +51,6 @@ function AppContent() {
       .then(([diff, commitList]) => {
         setDiffData(diff);
         setCommits(commitList);
-        setHasCommits(commitList.length > 0);
         setLoading(false);
       })
       .catch((err) => {
@@ -62,15 +59,10 @@ function AppContent() {
       });
   }, []);
 
-  // Subscribe to SSE for live updates (when another diffmil instance posts new diff)
-  const selectedCommitRef = useRef(selectedCommit);
-  selectedCommitRef.current = selectedCommit;
-
   useEffect(() => {
     const es = new EventSource("/_/events");
 
     es.addEventListener("update", () => {
-      // Re-fetch current diff (ignore commit selection — new diff was pushed)
       fetch("/_/api/diff")
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -80,14 +72,10 @@ function AppContent() {
           setDiffData(data);
           setSelectedCommit(null);
         })
-        .catch(() => {
-          // silently ignore
-        });
+        .catch(() => {});
     });
 
-    es.onerror = () => {
-      // EventSource auto-reconnects
-    };
+    es.onerror = () => {};
 
     return () => es.close();
   }, []);
@@ -127,10 +115,10 @@ function AppContent() {
   }
 
   const files = diffData?.files ?? [];
+  const hasCommits = commits.length > 0;
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Header */}
       <header className="bg-gh-bg-secondary border-b border-gh-border px-4 py-2 flex items-center gap-3 shrink-0">
         <h1 className="text-sm font-semibold text-gh-text-primary">
           diffmil
@@ -146,9 +134,7 @@ function AppContent() {
         </div>
       </header>
 
-      {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Commit history panel (left) */}
         {hasCommits && (
           <aside className="w-[300px] shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden">
             <CommitList
@@ -159,14 +145,12 @@ function AppContent() {
           </aside>
         )}
 
-        {/* File list panel */}
         {files.length > 0 && (
           <aside className="w-[240px] shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden">
             <FileList files={files} />
           </aside>
         )}
 
-        {/* Diff area */}
         <main className="flex-1 overflow-y-auto p-4">
           {diffLoading ? (
             <div className="flex items-center justify-center h-full text-gh-text-muted">

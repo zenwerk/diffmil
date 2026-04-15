@@ -1,22 +1,9 @@
 import type { DiffFile } from "../types";
+import { STATUS_META } from "../constants/status";
 
 interface FileListProps {
   files: DiffFile[];
 }
-
-const statusColor: Record<string, string> = {
-  modified: "text-gh-warning",
-  added: "text-gh-accent",
-  deleted: "text-gh-danger",
-  renamed: "text-purple-400",
-};
-
-const statusLabel: Record<string, string> = {
-  modified: "M",
-  added: "A",
-  deleted: "D",
-  renamed: "R",
-};
 
 export function FileList({ files }: FileListProps) {
   const handleClick = (path: string) => {
@@ -31,7 +18,6 @@ export function FileList({ files }: FileListProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="px-3 py-2 border-b border-gh-border text-sm text-gh-text-secondary">
         <span className="font-semibold text-gh-text-primary">
           {files.length}
@@ -45,24 +31,26 @@ export function FileList({ files }: FileListProps) {
         )}
       </div>
 
-      {/* File list */}
       <div className="flex-1 overflow-y-auto">
-        {files.map((file) => (
-          <button
-            key={file.path}
-            onClick={() => handleClick(file.path)}
-            className="w-full text-left px-3 py-1.5 hover:bg-gh-bg-tertiary flex items-center gap-2 group"
-          >
-            <span
-              className={`text-xs font-bold shrink-0 w-4 text-center ${statusColor[file.status] ?? ""}`}
+        {files.map((file) => {
+          const meta = STATUS_META[file.status] ?? STATUS_META.modified;
+          return (
+            <button
+              key={file.path}
+              onClick={() => handleClick(file.path)}
+              className="w-full text-left px-3 py-1.5 hover:bg-gh-bg-tertiary flex items-center gap-2 group"
             >
-              {statusLabel[file.status] ?? "?"}
-            </span>
-            <span className="font-mono text-xs text-gh-text-secondary group-hover:text-gh-text-primary truncate">
-              {file.path}
-            </span>
-          </button>
-        ))}
+              <span
+                className={`text-xs font-bold shrink-0 w-4 text-center ${meta.colorClass}`}
+              >
+                {meta.label}
+              </span>
+              <span className="font-mono text-xs text-gh-text-secondary group-hover:text-gh-text-primary truncate">
+                {file.path}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

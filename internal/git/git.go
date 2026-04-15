@@ -3,9 +3,9 @@ package git
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -52,7 +52,7 @@ func Log(ctx context.Context, dir string, maxCount int) ([]Commit, error) {
 	cmd := exec.CommandContext(ctx, "git", "log",
 		"--format="+format,
 		"--no-merges",
-		"-n", itoa(maxCount),
+		"-n", strconv.Itoa(maxCount),
 	)
 	cmd.Dir = dir
 
@@ -82,18 +82,11 @@ func Log(ctx context.Context, dir string, maxCount int) ([]Commit, error) {
 	return commits, nil
 }
 
-// HasUncommittedChanges returns true if there are uncommitted changes (staged or unstaged).
+// HasUncommittedChanges returns true if there are uncommitted changes (staged, unstaged, or untracked).
 func HasUncommittedChanges(ctx context.Context, dir string) bool {
-	cmd := exec.CommandContext(ctx, "git", "diff", "--quiet", "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	cmd.Dir = dir
-	if cmd.Run() != nil {
-		// Non-zero exit means there are differences
-		return true
-	}
-	// Also check for untracked files
-	cmd2 := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
-	cmd2.Dir = dir
-	out, err := cmd2.Output()
+	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
@@ -119,6 +112,3 @@ func IsGitRepo(dir string) bool {
 	return cmd.Run() == nil
 }
 
-func itoa(n int) string {
-	return fmt.Sprintf("%d", n)
-}

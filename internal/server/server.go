@@ -1,8 +1,8 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -18,9 +18,7 @@ import (
 
 // Config holds server configuration.
 type Config struct {
-	// RepoDir is the git repository path. Empty if running in stdin mode.
-	RepoDir string
-	// InitialDiff is the diff data parsed at startup (for stdin mode or default view).
+	RepoDir     string
 	InitialDiff *diff.DiffResponse
 }
 
@@ -37,11 +35,8 @@ type State struct {
 	restartCh  chan struct{}
 }
 
-// ShutdownCh returns a channel that is closed when a shutdown is requested.
 func (s *State) ShutdownCh() <-chan struct{} { return s.shutdownCh }
-
-// RestartCh returns a channel that is closed when a restart is requested.
-func (s *State) RestartCh() <-chan struct{} { return s.restartCh }
+func (s *State) RestartCh() <-chan struct{}  { return s.restartCh }
 
 func newState(cfg Config) *State {
 	return &State{
@@ -53,7 +48,6 @@ func newState(cfg Config) *State {
 	}
 }
 
-// UpdateDiff replaces the current diff and notifies all SSE subscribers.
 func (s *State) UpdateDiff(resp *diff.DiffResponse) {
 	s.mu.Lock()
 	s.currentDiff = resp
@@ -93,8 +87,7 @@ func (s *State) notify(event string) {
 	}
 }
 
-// New creates an HTTP handler that serves the diff API and embedded SPA.
-// It returns both the handler and the State (for shutdown/restart signaling).
+// New creates an HTTP handler and returns it with the State for shutdown/restart signaling.
 func New(cfg Config) (http.Handler, *State) {
 	state := newState(cfg)
 	mux := http.NewServeMux()
@@ -111,8 +104,16 @@ func New(cfg Config) (http.Handler, *State) {
 	return mux, state
 }
 
-// workingTreeHash is the special hash used for uncommitted changes.
 const workingTreeHash = "working"
+
+// parseDiffFromReader parses a unified diff from a reader into a DiffResponse.
+func parseDiffFromReader(r io.Reader) (*diff.DiffResponse, error) {
+	files, _, err := gitdiff.Parse(r)
+	if err != nil {
+		return nil, err
+	}
+	return diff.FromGitDiff(files), nil
+}
 
 func handleGetDiff(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -124,36 +125,25 @@ func handleGetDiff(state *State) http.HandlerFunc {
 			return
 		}
 
-		// Handle uncommitted changes
+		ctx := r.Context()
+		var reader io.Reader
+		var err error
+
 		if commitHash == workingTreeHash {
-			reader, err := gitcmd.DiffUncommitted(context.Background(), state.repoDir)
-			if err != nil {
-				http.Error(w, `{"error":"failed to get uncommitted diff"}`, http.StatusInternalServerError)
-				return
-			}
-			files, _, err := gitdiff.Parse(reader)
-			if err != nil {
-				http.Error(w, `{"error":"failed to parse diff"}`, http.StatusInternalServerError)
-				return
-			}
-			json.NewEncoder(w).Encode(diff.FromGitDiff(files))
-			return
+			reader, err = gitcmd.DiffUncommitted(ctx, state.repoDir)
+		} else {
+			reader, err = gitcmd.DiffShow(ctx, state.repoDir, commitHash)
 		}
-
-		// Fetch diff for a specific commit on demand
-		reader, err := gitcmd.DiffShow(context.Background(), state.repoDir, commitHash)
 		if err != nil {
-			http.Error(w, `{"error":"failed to get diff for commit"}`, http.StatusInternalServerError)
+			http.Error(w, `{"error":"failed to get diff"}`, http.StatusInternalServerError)
 			return
 		}
 
-		files, _, err := gitdiff.Parse(reader)
+		resp, err := parseDiffFromReader(reader)
 		if err != nil {
 			http.Error(w, `{"error":"failed to parse diff"}`, http.StatusInternalServerError)
 			return
 		}
-
-		resp := diff.FromGitDiff(files)
 		json.NewEncoder(w).Encode(resp)
 	}
 }
@@ -180,7 +170,7 @@ func handleCommits(state *State) http.HandlerFunc {
 			return
 		}
 
-		ctx := context.Background()
+		ctx := r.Context()
 
 		commits, err := gitcmd.Log(ctx, state.repoDir, 50)
 		if err != nil {
@@ -188,7 +178,6 @@ func handleCommits(state *State) http.HandlerFunc {
 			return
 		}
 
-		// Prepend uncommitted changes entry if there are any
 		if gitcmd.HasUncommittedChanges(ctx, state.repoDir) {
 			working := gitcmd.Commit{
 				Hash:    workingTreeHash,
@@ -218,7 +207,6 @@ func handleShutdown(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		w.Write([]byte(`{"ok":true}`))
-		// Signal shutdown after response is sent
 		go func() {
 			select {
 			case state.shutdownCh <- struct{}{}:
@@ -232,7 +220,6 @@ func handleRestart(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		w.Write([]byte(`{"ok":true}`))
-		// Signal restart after response is sent
 		go func() {
 			select {
 			case state.restartCh <- struct{}{}:
@@ -257,7 +244,6 @@ func handleSSE(state *State) http.HandlerFunc {
 		ch := state.subscribe()
 		defer state.unsubscribe(ch)
 
-		// Send initial connected event
 		w.Write([]byte("event: connected\ndata: {}\n\n"))
 		flusher.Flush()
 
@@ -298,7 +284,6 @@ func handleSPA() http.HandlerFunc {
 			return
 		}
 
-		// SPA fallback: serve index.html for client-side routing
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	}

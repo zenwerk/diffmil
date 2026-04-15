@@ -33,7 +33,7 @@ function loadStoredMode(): ThemeMode {
 
 export function useTheme() {
   const [mode, setModeState] = useState<ThemeMode>(loadStoredMode);
-  const [resolved, setResolved] = useState<ResolvedTheme>(
+  const [resolved, setResolved] = useState<ResolvedTheme>(() =>
     resolveTheme(loadStoredMode()),
   );
 
