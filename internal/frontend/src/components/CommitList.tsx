@@ -1,9 +1,11 @@
+import { PanelLeftClose } from "lucide-react";
 import type { Commit } from "../types";
 
 interface CommitListProps {
   commits: Commit[];
   selectedHash: string | null;
   onSelect: (hash: string) => void;
+  onCollapse: () => void;
 }
 
 function formatDate(dateStr: string): string {
@@ -80,14 +82,24 @@ export function CommitList({
   commits,
   selectedHash,
   onSelect,
+  onCollapse,
 }: CommitListProps) {
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-2 border-b border-gh-border text-sm font-semibold text-gh-text-primary">
-        Commits
-        <span className="ml-1 text-gh-text-muted font-normal">
+      <div className="px-3 py-2 border-b border-gh-border flex items-center">
+        <span className="text-sm font-semibold text-gh-text-primary">
+          Commits
+        </span>
+        <span className="ml-1 text-sm text-gh-text-muted font-normal">
           ({commits.length})
         </span>
+        <button
+          onClick={onCollapse}
+          title="Hide commit history"
+          className="ml-auto p-1 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
+        >
+          <PanelLeftClose size={16} />
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto">
         {commits.map((commit) => (

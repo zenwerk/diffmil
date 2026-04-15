@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { PanelLeft } from "lucide-react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -9,6 +10,7 @@ import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme } from "./hooks/useTheme";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
+const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
 
 function loadViewMode(): DiffViewMode {
   try {
@@ -20,6 +22,16 @@ function loadViewMode(): DiffViewMode {
   return "unified";
 }
 
+function loadCommitsPanelOpen(): boolean {
+  try {
+    const stored = localStorage.getItem(COMMITS_PANEL_KEY);
+    if (stored === "false") return false;
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
 function AppContent() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [commits, setCommits] = useState<Commit[]>([]);
@@ -28,11 +40,20 @@ function AppContent() {
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewModeState] = useState<DiffViewMode>(loadViewMode);
+  const [commitsPanelOpen, setCommitsPanelOpenState] = useState(loadCommitsPanelOpen);
   const { shikiTheme } = useTheme();
 
   const setViewMode = useCallback((mode: DiffViewMode) => {
     setViewModeState(mode);
     localStorage.setItem(VIEW_MODE_KEY, mode);
+  }, []);
+
+  const toggleCommitsPanel = useCallback(() => {
+    setCommitsPanelOpenState((prev) => {
+      const next = !prev;
+      localStorage.setItem(COMMITS_PANEL_KEY, String(next));
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -136,13 +157,26 @@ function AppContent() {
 
       <div className="flex flex-1 overflow-hidden">
         {hasCommits && (
-          <aside className="w-[300px] shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden">
-            <CommitList
-              commits={commits}
-              selectedHash={selectedCommit}
-              onSelect={handleSelectCommit}
-            />
-          </aside>
+          commitsPanelOpen ? (
+            <aside className="w-[300px] shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden">
+              <CommitList
+                commits={commits}
+                selectedHash={selectedCommit}
+                onSelect={handleSelectCommit}
+                onCollapse={toggleCommitsPanel}
+              />
+            </aside>
+          ) : (
+            <div className="shrink-0 border-r border-gh-border bg-gh-bg-secondary flex items-start pt-2 px-1">
+              <button
+                onClick={toggleCommitsPanel}
+                title="Show commit history"
+                className="p-1.5 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
+              >
+                <PanelLeft size={16} />
+              </button>
+            </div>
+          )
         )}
 
         {files.length > 0 && (

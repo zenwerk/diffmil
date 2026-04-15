@@ -8,8 +8,8 @@ interface DiffLineRowProps {
 }
 
 const LINE_BG: Record<string, string> = {
-  add: "bg-diff-addition-bg",
-  delete: "bg-diff-deletion-bg",
+  add: "bg-diff-addition-bg hover:bg-diff-add-hover",
+  delete: "bg-diff-deletion-bg hover:bg-diff-del-hover",
 };
 
 const LINE_BORDER: Record<string, string> = {
@@ -25,7 +25,7 @@ const LINE_PREFIX: Record<string, string> = {
 
 export function DiffLineRow({ line, tokens }: DiffLineRowProps) {
   return (
-    <tr className={`${LINE_BG[line.type] ?? ""} hover:brightness-125`}>
+    <tr className={`${LINE_BG[line.type] ?? "hover:bg-line-hover"}`}>
       <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
         {line.oldLineNumber ?? ""}
       </td>

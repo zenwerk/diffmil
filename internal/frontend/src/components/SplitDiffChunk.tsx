@@ -130,7 +130,7 @@ export function SplitDiffChunk({ chunk, lineTokens }: SplitDiffChunkProps) {
         </td>
       </tr>
       {rows.map((row, i) => (
-        <tr key={i} className="hover:brightness-125">
+        <tr key={i}>
           <SplitCell side={row.left} />
           <SplitCell side={row.right} />
         </tr>
