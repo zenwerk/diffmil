@@ -18,6 +18,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/zenwerk/diffmil/internal/diff"
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
+	"github.com/zenwerk/diffmil/internal/pidfile"
 	"github.com/zenwerk/diffmil/internal/server"
 )
 
@@ -25,24 +26,31 @@ func main() {
 	port := flag.Int("port", 8080, "server port")
 	noOpen := flag.Bool("no-open", false, "don't open browser")
 	foreground := flag.Bool("foreground", false, "run server in foreground (don't daemonize)")
-	doStatus := flag.Bool("status", false, "show status of running server")
-	doShutdown := flag.Bool("shutdown", false, "shut down the running server")
-	doRestart := flag.Bool("restart", false, "restart the running server")
+	doStatus := flag.Bool("status", false, "show status of running server(s)")
+	doShutdown := flag.Bool("shutdown", false, "shut down running server(s)")
+	doRestart := flag.Bool("restart", false, "restart running server")
+	all := flag.Bool("all", false, "apply to all running servers (with --shutdown or --status)")
 	flag.Parse()
 
-	url := fmt.Sprintf("http://localhost:%d", *port)
-
-	// Handle control commands first (no diff parsing needed)
+	// Handle control commands
 	if *doStatus {
-		runStatus(url)
+		if *all || !portExplicitlySet() {
+			runStatusAll()
+		} else {
+			runStatus(fmt.Sprintf("http://localhost:%d", *port))
+		}
 		return
 	}
 	if *doShutdown {
-		runShutdown(url)
+		if *all {
+			runShutdownAll()
+		} else {
+			runShutdown(fmt.Sprintf("http://localhost:%d", *port))
+		}
 		return
 	}
 	if *doRestart {
-		runRestart(url)
+		runRestart(fmt.Sprintf("http://localhost:%d", *port))
 		return
 	}
 
@@ -54,7 +62,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Check if a server is already running on this port
+	url := fmt.Sprintf("http://localhost:%d", *port)
+
 	if probeServer(url) {
 		if err := postDiff(url, cfg.InitialDiff); err != nil {
 			log.Fatalf("failed to send diff to existing server: %v", err)
@@ -66,7 +75,6 @@ func main() {
 		return
 	}
 
-	// If not foreground mode, spawn a child process and exit
 	if !*foreground {
 		pid, err := spawnBackground(*port)
 		if err != nil {
@@ -87,17 +95,33 @@ func main() {
 		return
 	}
 
-	// Foreground mode: run the server directly
+	// Foreground mode
 	runForeground(ctx, cancel, cfg, *port)
+}
+
+// portExplicitlySet returns true if --port was explicitly passed on the command line.
+func portExplicitlySet() bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "port" {
+			found = true
+		}
+	})
+	return found
 }
 
 func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int) {
 	handler, state := server.New(cfg)
 
+	// Write PID file
+	if err := pidfile.Write(port); err != nil {
+		log.Printf("warning: failed to write PID file: %v", err)
+	}
+	defer pidfile.Remove(port)
+
 	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: handler}
 
-	// Graceful shutdown helper
 	shutdown := func() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
@@ -123,7 +147,6 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 	}
 
 	if restartRequested {
-		// Small delay to ensure port is released
 		time.Sleep(200 * time.Millisecond)
 
 		binPath, err := os.Executable()
@@ -185,6 +208,25 @@ func runStatus(url string) {
 	fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, s.PID, s.Status)
 }
 
+func runStatusAll() {
+	ports := pidfile.DiscoverPorts()
+	if len(ports) == 0 {
+		fmt.Fprintln(os.Stderr, "diffmil: no running servers found")
+		os.Exit(1)
+	}
+
+	for _, p := range ports {
+		url := fmt.Sprintf("http://localhost:%d", p)
+		s, err := fetchStatus(url, 1*time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "%s (stopped)\n", url)
+			pidfile.Remove(p)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, s.PID, s.Status)
+		}
+	}
+}
+
 func runShutdown(url string) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Post(url+"/_/api/shutdown", "application/json", nil)
@@ -200,6 +242,26 @@ func runShutdown(url string) {
 	}
 
 	fmt.Fprintf(os.Stderr, "diffmil: shutdown request sent to %s\n", url)
+}
+
+func runShutdownAll() {
+	ports := pidfile.DiscoverPorts()
+	if len(ports) == 0 {
+		fmt.Fprintln(os.Stderr, "diffmil: no running servers found")
+		return
+	}
+
+	for _, p := range ports {
+		url := fmt.Sprintf("http://localhost:%d", p)
+		s, err := fetchStatus(url, 1*time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "diffmil: %s (already stopped, cleaning up)\n", url)
+			pidfile.Remove(p)
+			continue
+		}
+		runShutdown(url)
+		fmt.Fprintf(os.Stderr, "  pid %d\n", s.PID)
+	}
 }
 
 func runRestart(url string) {
@@ -218,7 +280,6 @@ func runRestart(url string) {
 
 	fmt.Fprintf(os.Stderr, "diffmil: restart request sent to %s\n", url)
 
-	// Wait for new server to come up
 	time.Sleep(500 * time.Millisecond)
 	if err := waitForReady(url, 10*time.Second); err != nil {
 		fmt.Fprintf(os.Stderr, "diffmil: warning: new server did not come up: %v\n", err)
