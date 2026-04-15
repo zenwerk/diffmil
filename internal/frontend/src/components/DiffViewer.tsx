@@ -14,9 +14,8 @@ interface DiffViewerProps {
 
 export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
   const meta = STATUS_META[file.status] ?? STATUS_META.modified;
-  const { ready, highlightLines } = useHighlighter();
+  const { ready, langVersion, highlightLines } = useHighlighter();
 
-  // Collect all line contents and highlight them in one shot
   const allLineTokens = useMemo(() => {
     if (!ready || file.chunks.length === 0) return null;
 
@@ -44,7 +43,7 @@ export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
       result.push(chunkTokens);
     }
     return result;
-  }, [ready, file, shikiTheme, highlightLines]);
+  }, [ready, langVersion, file, shikiTheme, highlightLines]);
 
   const ChunkComponent = viewMode === "split" ? SplitDiffChunk : DiffChunk;
 

@@ -1,4 +1,9 @@
-import { createHighlighter, type ThemedToken, type BundledLanguage } from "shiki";
+import {
+  createHighlighter,
+  bundledLanguages,
+  type ThemedToken,
+  type BundledLanguage,
+} from "shiki";
 import {
   createContext,
   useContext,
@@ -15,6 +20,7 @@ type Highlighter = Awaited<ReturnType<typeof createHighlighter>>;
 
 interface HighlighterContextValue {
   ready: boolean;
+  langVersion: number;
   highlightLines: (
     lines: string[],
     lang: string,
@@ -24,6 +30,7 @@ interface HighlighterContextValue {
 
 const HighlighterContext = createContext<HighlighterContextValue>({
   ready: false,
+  langVersion: 0,
   highlightLines: () => [],
 });
 
@@ -141,8 +148,10 @@ const THEMES = ["github-dark", "github-light"] as const;
 
 export function HighlighterProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [langVersion, setLangVersion] = useState(0);
   const hlRef = useRef<Highlighter | null>(null);
   const loadedLangs = useRef<Set<string>>(new Set());
+  const loadingLangs = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -167,20 +176,39 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const loadLanguage = useCallback((lang: string) => {
+    if (loadedLangs.current.has(lang) || loadingLangs.current.has(lang)) return;
+    if (!(lang in bundledLanguages)) return;
+
+    loadingLangs.current.add(lang);
+    const hl = hlRef.current;
+    if (!hl) return;
+
+    hl.loadLanguage(lang as BundledLanguage)
+      .then(() => {
+        loadedLangs.current.add(lang);
+        loadingLangs.current.delete(lang);
+        setLangVersion((v) => v + 1);
+      })
+      .catch(() => {
+        loadingLangs.current.delete(lang);
+      });
+  }, []);
+
   const highlightLines = useCallback(
     (lines: string[], lang: string, theme: string): ThemedToken[][] => {
       const hl = hlRef.current;
       if (!hl) return [];
 
-      // Use "text" for unsupported languages
-      const effectiveLang = (
-        loadedLangs.current.has(lang) ? lang : "text"
-      ) as BundledLanguage;
+      if (!loadedLangs.current.has(lang)) {
+        loadLanguage(lang);
+        return [];
+      }
 
       try {
         const code = lines.join("\n");
         const result = hl.codeToTokens(code, {
-          lang: effectiveLang,
+          lang: lang as BundledLanguage,
           theme: theme as "github-dark" | "github-light",
         });
         return result.tokens;
@@ -188,12 +216,12 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
         return [];
       }
     },
-    [],
+    [loadLanguage],
   );
 
   return createElement(
     HighlighterContext.Provider,
-    { value: { ready, highlightLines } },
+    { value: { ready, langVersion, highlightLines } },
     children,
   );
 }
