@@ -5,9 +5,9 @@ interface FileListProps {
 }
 
 const statusColor: Record<string, string> = {
-  modified: "text-github-warning",
-  added: "text-github-accent",
-  deleted: "text-github-danger",
+  modified: "text-gh-warning",
+  added: "text-gh-accent",
+  deleted: "text-gh-danger",
   renamed: "text-purple-400",
 };
 
@@ -32,8 +32,8 @@ export function FileList({ files }: FileListProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-github-border text-sm text-github-text-secondary">
-        <span className="font-semibold text-github-text-primary">
+      <div className="px-3 py-2 border-b border-gh-border text-sm text-gh-text-secondary">
+        <span className="font-semibold text-gh-text-primary">
           {files.length}
         </span>{" "}
         files changed
@@ -51,14 +51,14 @@ export function FileList({ files }: FileListProps) {
           <button
             key={file.path}
             onClick={() => handleClick(file.path)}
-            className="w-full text-left px-3 py-1.5 hover:bg-github-bg-tertiary flex items-center gap-2 group"
+            className="w-full text-left px-3 py-1.5 hover:bg-gh-bg-tertiary flex items-center gap-2 group"
           >
             <span
               className={`text-xs font-bold shrink-0 w-4 text-center ${statusColor[file.status] ?? ""}`}
             >
               {statusLabel[file.status] ?? "?"}
             </span>
-            <span className="font-mono text-xs text-github-text-secondary group-hover:text-github-text-primary truncate">
+            <span className="font-mono text-xs text-gh-text-secondary group-hover:text-gh-text-primary truncate">
               {file.path}
             </span>
           </button>

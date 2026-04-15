@@ -24,16 +24,16 @@ export function DiffLineRow({ line }: DiffLineRowProps) {
 
   return (
     <tr className={`${bgClass} hover:brightness-125`}>
-      <td className="w-[1%] min-w-[50px] px-2 text-right text-github-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
+      <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
         {line.oldLineNumber ?? ""}
       </td>
-      <td className="w-[1%] min-w-[50px] px-2 text-right text-github-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
+      <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
         {line.newLineNumber ?? ""}
       </td>
       <td
         className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${borderClass}`}
       >
-        <span className="text-github-text-muted select-none">{prefix}</span>
+        <span className="text-gh-text-muted select-none">{prefix}</span>
         {line.content}
       </td>
     </tr>

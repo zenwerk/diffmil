@@ -26,9 +26,9 @@ export function CommitList({
 }: CommitListProps) {
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-2 border-b border-github-border text-sm font-semibold text-github-text-primary">
+      <div className="px-3 py-2 border-b border-gh-border text-sm font-semibold text-gh-text-primary">
         Commits
-        <span className="ml-1 text-github-text-muted font-normal">
+        <span className="ml-1 text-gh-text-muted font-normal">
           ({commits.length})
         </span>
       </div>
@@ -39,22 +39,22 @@ export function CommitList({
             <button
               key={commit.hash}
               onClick={() => onSelect(commit.hash)}
-              className={`w-full text-left px-3 py-2 border-b border-github-border/50 hover:bg-github-bg-tertiary transition-colors ${
-                isSelected ? "bg-github-bg-tertiary border-l-2 border-l-blue-500" : "border-l-2 border-l-transparent"
+              className={`w-full text-left px-3 py-2 border-b border-gh-border/50 hover:bg-gh-bg-tertiary transition-colors ${
+                isSelected ? "bg-gh-bg-tertiary border-l-2 border-l-blue-500" : "border-l-2 border-l-transparent"
               }`}
             >
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-xs text-blue-400 shrink-0">
+                <span className="font-mono text-xs text-gh-link shrink-0">
                   {commit.short}
                 </span>
-                <span className="text-xs text-github-text-muted truncate">
+                <span className="text-xs text-gh-text-muted truncate">
                   {formatDate(commit.date)}
                 </span>
               </div>
-              <div className="text-sm text-github-text-primary truncate mt-0.5">
+              <div className="text-sm text-gh-text-primary truncate mt-0.5">
                 {commit.subject}
               </div>
-              <div className="text-xs text-github-text-muted truncate">
+              <div className="text-xs text-gh-text-muted truncate">
                 {commit.author}
               </div>
             </button>
