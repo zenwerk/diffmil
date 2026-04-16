@@ -196,12 +196,6 @@ function AppContent() {
           )
         )}
 
-        {files.length > 0 && (
-          <aside className="w-[240px] shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden">
-            <FileList files={files} />
-          </aside>
-        )}
-
         <main className="flex-1 overflow-y-auto p-4">
           {diffLoading ? (
             <div className="flex items-center justify-center h-full text-gh-text-muted">
@@ -224,6 +218,12 @@ function AppContent() {
             ))
           )}
         </main>
+
+        {files.length > 0 && (
+          <aside className="w-[240px] shrink-0 border-l border-gh-border bg-gh-bg-secondary overflow-hidden">
+            <FileList files={files} />
+          </aside>
+        )}
       </div>
 
       <Toast
