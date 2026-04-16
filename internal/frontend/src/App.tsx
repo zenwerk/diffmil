@@ -8,7 +8,7 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { ViewModeToggle } from "./components/ViewModeToggle";
 import { Toast } from "./components/Toast";
 import { HighlighterProvider } from "./hooks/useHighlighter";
-import { useTheme } from "./hooks/useTheme";
+import { useTheme, ThemeProvider } from "./hooks/useTheme";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -57,6 +57,17 @@ function AppContent() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "[") {
+        e.preventDefault();
+        toggleCommitsPanel();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [toggleCommitsPanel]);
 
   const fetchCommits = useCallback(
     () =>
@@ -237,8 +248,10 @@ function AppContent() {
 
 export function App() {
   return (
-    <HighlighterProvider>
-      <AppContent />
-    </HighlighterProvider>
+    <ThemeProvider>
+      <HighlighterProvider>
+        <AppContent />
+      </HighlighterProvider>
+    </ThemeProvider>
   );
 }
