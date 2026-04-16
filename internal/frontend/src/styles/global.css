@@ -1,3 +1,4 @@
+@import "@fontsource-variable/fira-code";
 @import "tailwindcss";
 
 /* Theme tokens as CSS custom properties, switched by data-theme attribute */
@@ -75,8 +76,8 @@ html[data-theme="light"] {
   --color-diff-del-hover: var(--color-diff-del-line-hover);
   --color-line-hover: var(--color-normal-line-hover);
 
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  --font-mono: "Fira Code Variable", ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 html,
@@ -97,4 +98,8 @@ body {
 
 button {
   cursor: pointer;
+}
+
+.font-mono {
+  font-feature-settings: "liga" 1, "calt" 1;
 }
