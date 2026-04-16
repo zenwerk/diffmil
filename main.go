@@ -120,7 +120,7 @@ Options:
 	}
 
 	// Foreground mode
-	runForeground(ctx, cancel, cfg, *port)
+	runForeground(ctx, cancel, cfg, *port, *noOpen)
 }
 
 // portExplicitlySet returns true if --port was explicitly passed on the command line.
@@ -134,13 +134,22 @@ func portExplicitlySet() bool {
 	return found
 }
 
-func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int) {
+func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int, noOpen bool) {
 	handler, state := server.New(cfg)
 
 	if err := pidfile.Write(port); err != nil {
 		log.Printf("warning: failed to write PID file: %v", err)
 	}
 	defer pidfile.Remove(port)
+
+	url := fmt.Sprintf("http://localhost:%d", port)
+	fmt.Fprintf(os.Stderr, "diffmil: serving at %s (pid %d)\n", url, os.Getpid())
+
+	if !noOpen {
+		if err := browser.OpenURL(url); err != nil {
+			log.Printf("could not open browser: %v", err)
+		}
+	}
 
 	// Watch git repository for changes
 	if cfg.RepoDir != "" {
