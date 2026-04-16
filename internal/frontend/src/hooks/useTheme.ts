@@ -1,4 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useContext,
+  createContext,
+  createElement,
+  type ReactNode,
+} from "react";
 
 export type ThemeMode = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
@@ -31,7 +39,24 @@ function loadStoredMode(): ThemeMode {
   return "system";
 }
 
-export function useTheme() {
+interface ThemeContextValue {
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
+  resolved: ResolvedTheme;
+  shikiTheme: "github-dark" | "github-light";
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function useTheme(): ThemeContextValue {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) {
+    throw new Error("useTheme must be used within ThemeProvider");
+  }
+  return ctx;
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const initialMode = loadStoredMode();
   const [mode, setModeState] = useState<ThemeMode>(initialMode);
   const [resolved, setResolved] = useState<ResolvedTheme>(() =>
@@ -46,7 +71,6 @@ export function useTheme() {
     setResolved(r);
   }, []);
 
-  // Apply theme on mount and listen for system theme changes
   useEffect(() => {
     const r = resolveTheme(mode);
     applyTheme(r);
@@ -64,8 +88,11 @@ export function useTheme() {
     return () => mq.removeEventListener("change", handler);
   }, [mode]);
 
-  // shiki theme name corresponding to current resolved theme
   const shikiTheme = resolved === "dark" ? "github-dark" : "github-light";
 
-  return { mode, setMode, resolved, shikiTheme };
+  return createElement(
+    ThemeContext.Provider,
+    { value: { mode, setMode, resolved, shikiTheme } },
+    children,
+  );
 }
