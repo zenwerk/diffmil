@@ -7,6 +7,7 @@ import { DiffViewer } from "./components/DiffViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ViewModeToggle } from "./components/ViewModeToggle";
 import { Toast } from "./components/Toast";
+import { KeyboardShortcutsHelp } from "./components/KeyboardShortcutsHelp";
 import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme, ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
@@ -56,6 +57,7 @@ function AppContent() {
   const [commitsPanelOpen, setCommitsPanelOpenState] = useState(loadCommitsPanelOpen);
   const [filesPanelOpen, setFilesPanelOpenState] = useState(loadFilesPanelOpen);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const { shikiTheme } = useTheme();
   const commitPanel = usePanelResize("diffmil.commitsPanelWidth", 300, 160, 600, "right");
   const filePanel = usePanelResize("diffmil.filesPanelWidth", 240, 140, 500, "left");
@@ -206,8 +208,18 @@ function AppContent() {
         <div className="ml-auto flex items-center gap-2">
           <ViewModeToggle mode={viewMode} onChange={setViewMode} />
           <ThemeToggle />
+          <button
+            onClick={() => setShortcutsHelpOpen(true)}
+            title="キーボードショートカット"
+            className="p-1.5 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors text-sm font-semibold leading-none"
+          >
+            ?
+          </button>
         </div>
       </header>
+      {shortcutsHelpOpen && (
+        <KeyboardShortcutsHelp onClose={() => setShortcutsHelpOpen(false)} />
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {hasCommits && (
