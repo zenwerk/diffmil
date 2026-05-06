@@ -9,6 +9,7 @@ import { ViewModeToggle } from "./components/ViewModeToggle";
 import { Toast } from "./components/Toast";
 import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme, ThemeProvider } from "./hooks/useTheme";
+import { usePanelResize } from "./hooks/usePanelResize";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -44,6 +45,8 @@ function AppContent() {
   const [commitsPanelOpen, setCommitsPanelOpenState] = useState(loadCommitsPanelOpen);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const { shikiTheme } = useTheme();
+  const commitPanel = usePanelResize("diffmil.commitsPanelWidth", 300, 160, 600, "right");
+  const filePanel = usePanelResize("diffmil.filesPanelWidth", 240, 140, 500, "left");
 
   const setViewMode = useCallback((mode: DiffViewMode) => {
     setViewModeState(mode);
@@ -186,12 +189,21 @@ function AppContent() {
       <div className="flex flex-1 overflow-hidden">
         {hasCommits && (
           commitsPanelOpen ? (
-            <aside className="w-[300px] shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden">
-              <CommitList
-                commits={commits}
-                selectedHash={selectedCommit}
-                onSelect={handleSelectCommit}
-                onCollapse={toggleCommitsPanel}
+            <aside
+              className="shrink-0 border-r border-gh-border bg-gh-bg-secondary overflow-hidden relative flex"
+              style={{ width: commitPanel.width }}
+            >
+              <div className="flex-1 overflow-hidden">
+                <CommitList
+                  commits={commits}
+                  selectedHash={selectedCommit}
+                  onSelect={handleSelectCommit}
+                  onCollapse={toggleCommitsPanel}
+                />
+              </div>
+              <div
+                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
+                onMouseDown={commitPanel.onMouseDown}
               />
             </aside>
           ) : (
@@ -231,8 +243,17 @@ function AppContent() {
         </main>
 
         {files.length > 0 && (
-          <aside className="w-[240px] shrink-0 border-l border-gh-border bg-gh-bg-secondary overflow-hidden">
-            <FileList files={files} />
+          <aside
+            className="shrink-0 border-l border-gh-border bg-gh-bg-secondary overflow-hidden relative flex"
+            style={{ width: filePanel.width }}
+          >
+            <div
+              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
+              onMouseDown={filePanel.onMouseDown}
+            />
+            <div className="flex-1 overflow-hidden">
+              <FileList files={files} />
+            </div>
           </aside>
         )}
       </div>
