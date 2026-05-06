@@ -1,11 +1,13 @@
+import { PanelRightClose } from "lucide-react";
 import type { DiffFile } from "../types";
 import { STATUS_META } from "../constants/status";
 
 interface FileListProps {
   files: DiffFile[];
+  onCollapse: () => void;
 }
 
-export function FileList({ files }: FileListProps) {
+export function FileList({ files, onCollapse }: FileListProps) {
   const handleClick = (path: string) => {
     const el = document.getElementById(`file-${encodeURIComponent(path)}`);
     if (el) {
@@ -18,7 +20,14 @@ export function FileList({ files }: FileListProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-2 border-b border-gh-border text-sm text-gh-text-secondary">
+      <div className="px-3 py-2 border-b border-gh-border flex items-center text-sm text-gh-text-secondary">
+        <button
+          onClick={onCollapse}
+          title="Hide file list"
+          className="mr-2 p-1 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
+        >
+          <PanelRightClose size={16} />
+        </button>
         <span className="font-semibold text-gh-text-primary">
           {files.length}
         </span>{" "}

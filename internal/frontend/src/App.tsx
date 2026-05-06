@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, PanelRight } from "lucide-react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -13,6 +13,7 @@ import { usePanelResize } from "./hooks/usePanelResize";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
+const FILES_PANEL_KEY = "diffmil.filesPanelOpen";
 
 function loadViewMode(): DiffViewMode {
   try {
@@ -34,6 +35,16 @@ function loadCommitsPanelOpen(): boolean {
   return true;
 }
 
+function loadFilesPanelOpen(): boolean {
+  try {
+    const stored = localStorage.getItem(FILES_PANEL_KEY);
+    if (stored === "false") return false;
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
 function AppContent() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [commits, setCommits] = useState<Commit[]>([]);
@@ -43,6 +54,7 @@ function AppContent() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewModeState] = useState<DiffViewMode>(loadViewMode);
   const [commitsPanelOpen, setCommitsPanelOpenState] = useState(loadCommitsPanelOpen);
+  const [filesPanelOpen, setFilesPanelOpenState] = useState(loadFilesPanelOpen);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const { shikiTheme } = useTheme();
   const commitPanel = usePanelResize("diffmil.commitsPanelWidth", 300, 160, 600, "right");
@@ -57,6 +69,14 @@ function AppContent() {
     setCommitsPanelOpenState((prev) => {
       const next = !prev;
       localStorage.setItem(COMMITS_PANEL_KEY, String(next));
+      return next;
+    });
+  }, []);
+
+  const toggleFilesPanel = useCallback(() => {
+    setFilesPanelOpenState((prev) => {
+      const next = !prev;
+      localStorage.setItem(FILES_PANEL_KEY, String(next));
       return next;
     });
   }, []);
@@ -243,18 +263,30 @@ function AppContent() {
         </main>
 
         {files.length > 0 && (
-          <aside
-            className="shrink-0 border-l border-gh-border bg-gh-bg-secondary overflow-hidden relative flex"
-            style={{ width: filePanel.width }}
-          >
-            <div
-              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
-              onMouseDown={filePanel.onMouseDown}
-            />
-            <div className="flex-1 overflow-hidden">
-              <FileList files={files} />
+          filesPanelOpen ? (
+            <aside
+              className="shrink-0 border-l border-gh-border bg-gh-bg-secondary overflow-hidden relative flex"
+              style={{ width: filePanel.width }}
+            >
+              <div
+                className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
+                onMouseDown={filePanel.onMouseDown}
+              />
+              <div className="flex-1 overflow-hidden">
+                <FileList files={files} onCollapse={toggleFilesPanel} />
+              </div>
+            </aside>
+          ) : (
+            <div className="shrink-0 border-l border-gh-border bg-gh-bg-secondary flex items-start pt-2 px-1">
+              <button
+                onClick={toggleFilesPanel}
+                title="Show file list"
+                className="p-1.5 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
+              >
+                <PanelRight size={16} />
+              </button>
             </div>
-          </aside>
+          )
         )}
       </div>
 
