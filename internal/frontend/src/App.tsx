@@ -86,11 +86,14 @@ function AppContent() {
       if (e.ctrlKey && e.key === "[") {
         e.preventDefault();
         toggleCommitsPanel();
+      } else if (e.ctrlKey && e.key === "]") {
+        e.preventDefault();
+        toggleFilesPanel();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel]);
+  }, [toggleCommitsPanel, toggleFilesPanel]);
 
   const fetchCommits = useCallback(
     () =>
