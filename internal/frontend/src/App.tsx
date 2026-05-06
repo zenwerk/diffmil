@@ -108,11 +108,14 @@ function AppContent() {
           next = current <= 0 ? 0 : current - 1;
         }
         document.getElementById(ids[next])?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (e.ctrlKey && e.key === "/") {
+        e.preventDefault();
+        setViewMode(viewMode === "unified" ? "split" : "unified");
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel, toggleFilesPanel, diffData]);
+  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode]);
 
   const fetchCommits = useCallback(
     () =>

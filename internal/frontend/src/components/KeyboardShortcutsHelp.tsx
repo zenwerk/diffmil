@@ -6,6 +6,7 @@ const SHORTCUTS = [
   { keys: ["Ctrl", "]"], description: "ファイルリストの表示/非表示" },
   { keys: ["Ctrl", "J"], description: "次のファイルへスクロール" },
   { keys: ["Ctrl", "K"], description: "前のファイルへスクロール" },
+  { keys: ["Ctrl", "/"], description: "Unified / Split 表示切り替え" },
 ];
 
 interface KeyboardShortcutsHelpProps {
