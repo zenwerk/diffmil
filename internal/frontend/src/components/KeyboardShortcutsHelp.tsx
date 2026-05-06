@@ -4,6 +4,8 @@ import { X } from "lucide-react";
 const SHORTCUTS = [
   { keys: ["Ctrl", "["], description: "コミットリストの表示/非表示" },
   { keys: ["Ctrl", "]"], description: "ファイルリストの表示/非表示" },
+  { keys: ["Ctrl", "J"], description: "次のファイルへスクロール" },
+  { keys: ["Ctrl", "K"], description: "前のファイルへスクロール" },
 ];
 
 interface KeyboardShortcutsHelpProps {

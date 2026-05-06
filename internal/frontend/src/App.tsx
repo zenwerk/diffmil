@@ -91,11 +91,28 @@ function AppContent() {
       } else if (e.ctrlKey && e.key === "]") {
         e.preventDefault();
         toggleFilesPanel();
+      } else if (e.ctrlKey && (e.key === "j" || e.key === "k")) {
+        e.preventDefault();
+        const files = diffData?.files ?? [];
+        if (files.length === 0) return;
+        const ids = files.map((f) => `file-${encodeURIComponent(f.path)}`);
+        const current = ids.findIndex((id) => {
+          const el = document.getElementById(id);
+          if (!el) return false;
+          return el.getBoundingClientRect().top >= -1;
+        });
+        let next: number;
+        if (e.key === "j") {
+          next = current === -1 ? 0 : Math.min(current + 1, ids.length - 1);
+        } else {
+          next = current <= 0 ? 0 : current - 1;
+        }
+        document.getElementById(ids[next])?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel, toggleFilesPanel]);
+  }, [toggleCommitsPanel, toggleFilesPanel, diffData]);
 
   const fetchCommits = useCallback(
     () =>
