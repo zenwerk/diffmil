@@ -245,19 +245,39 @@ function AppContent() {
 
   const files = diffData?.files ?? [];
   const hasCommits = commits.length > 0;
+  const selectedCommitInfo = selectedCommit
+    ? commits.find((c) => c.hash === selectedCommit) ?? null
+    : null;
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="bg-gh-bg-secondary border-b border-gh-border px-4 py-2 flex items-center gap-3 shrink-0">
-        <h1 className="text-sm font-semibold text-gh-text-primary">
+      <header className="bg-gh-bg-secondary border-b border-gh-border px-4 py-2 flex items-center gap-3 shrink-0 min-w-0">
+        <h1 className="text-sm font-semibold text-gh-text-primary shrink-0">
           diffmil
         </h1>
-        {selectedCommit && (
-          <span className="font-mono text-xs text-gh-text-muted">
-            {selectedCommit.slice(0, 7)}
-          </span>
+        {selectedCommitInfo && (
+          <div className="flex items-center gap-2 min-w-0 group relative">
+            <span className="font-mono text-xs text-gh-text-muted shrink-0">
+              {selectedCommitInfo.short}
+            </span>
+            <span className="text-xs text-gh-text-primary truncate">
+              {selectedCommitInfo.subject}
+            </span>
+            <span className="text-xs text-gh-text-muted shrink-0 hidden sm:block truncate max-w-[160px]">
+              {selectedCommitInfo.author}
+            </span>
+            {/* hover tooltip */}
+            <div className="pointer-events-none absolute left-0 top-full mt-1 z-50 hidden group-hover:block">
+              <div className="bg-gh-bg-secondary border border-gh-border rounded-lg shadow-xl p-3 text-xs space-y-1 w-max max-w-sm">
+                <div className="font-mono text-gh-link">{selectedCommitInfo.hash}</div>
+                <div className="text-gh-text-primary font-medium">{selectedCommitInfo.subject}</div>
+                <div className="text-gh-text-muted">{selectedCommitInfo.author}</div>
+                <div className="text-gh-text-muted">{new Date(selectedCommitInfo.date).toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 shrink-0">
           <ViewModeToggle mode={viewMode} onChange={setViewMode} />
           <ThemeToggle />
           <button
