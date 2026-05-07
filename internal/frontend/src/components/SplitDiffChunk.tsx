@@ -84,8 +84,8 @@ function SplitCell({
   if (!side) {
     return (
       <>
-        <td className="w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap bg-gh-bg-tertiary/50" />
-        <td className="px-2 font-mono text-sm whitespace-pre bg-gh-bg-tertiary/50" />
+        <td className="w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap bg-gh-bg-tertiary/50" />
+        <td className="px-2 font-mono text-[1em] whitespace-pre bg-gh-bg-tertiary/50" />
       </>
     );
   }
@@ -98,11 +98,11 @@ function SplitCell({
   return (
     <>
       <td
-        className={`w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap ${bg}`}
+        className={`w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap ${bg}`}
       >
         {lineNum ?? ""}
       </td>
-      <td className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${bg}`}>
+      <td className={`px-2 font-mono text-[1em] whitespace-pre overflow-x-auto ${bg}`}>
         <span className="text-gh-text-muted select-none">
           {LINE_PREFIX[line.type] ?? " "}
         </span>
@@ -123,7 +123,7 @@ export function SplitDiffChunk({ chunk, lineTokens }: SplitDiffChunkProps) {
       <tr className="bg-gh-bg-tertiary">
         <td
           colSpan={4}
-          className="px-2 py-1 font-mono text-xs text-gh-text-muted"
+          className="px-2 py-1 font-mono text-[0.85em] text-gh-text-muted"
         >
           {chunk.header}
         </td>

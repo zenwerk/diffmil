@@ -21,14 +21,14 @@ const LINE_BORDER: Record<string, string> = {
 export function DiffLineRow({ line, tokens }: DiffLineRowProps) {
   return (
     <tr className={`${LINE_BG[line.type] ?? "hover:bg-line-hover"}`}>
-      <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
+      <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap">
         {line.oldLineNumber ?? ""}
       </td>
-      <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-xs align-top whitespace-nowrap">
+      <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap">
         {line.newLineNumber ?? ""}
       </td>
       <td
-        className={`px-2 font-mono text-sm whitespace-pre overflow-x-auto ${LINE_BORDER[line.type] ?? "border-l-2 border-transparent"}`}
+        className={`px-2 font-mono text-[1em] whitespace-pre overflow-x-auto ${LINE_BORDER[line.type] ?? "border-l-2 border-transparent"}`}
       >
         <span className="text-gh-text-muted select-none">
           {LINE_PREFIX[line.type] ?? " "}

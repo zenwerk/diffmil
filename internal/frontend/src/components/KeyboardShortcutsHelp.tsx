@@ -7,6 +7,8 @@ const SHORTCUTS = [
   { keys: ["Ctrl", "J"], description: "次のファイルへスクロール" },
   { keys: ["Ctrl", "K"], description: "前のファイルへスクロール" },
   { keys: ["Ctrl", "/"], description: "Unified / Split 表示切り替え" },
+  { keys: ["Ctrl", "+"], description: "diffフォントサイズを拡大" },
+  { keys: ["Ctrl", "-"], description: "diffフォントサイズを縮小" },
 ];
 
 interface KeyboardShortcutsHelpProps {

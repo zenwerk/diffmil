@@ -15,6 +15,23 @@ import { usePanelResize } from "./hooks/usePanelResize";
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
 const FILES_PANEL_KEY = "diffmil.filesPanelOpen";
+const DIFF_FONT_SIZE_KEY = "diffmil.diffFontSize";
+const DIFF_FONT_SIZE_DEFAULT = 14;
+const DIFF_FONT_SIZE_MIN = 10;
+const DIFF_FONT_SIZE_MAX = 20;
+
+function loadDiffFontSize(): number {
+  try {
+    const stored = localStorage.getItem(DIFF_FONT_SIZE_KEY);
+    if (stored) {
+      const n = parseInt(stored, 10);
+      if (!isNaN(n) && n >= DIFF_FONT_SIZE_MIN && n <= DIFF_FONT_SIZE_MAX) return n;
+    }
+  } catch {
+    // ignore
+  }
+  return DIFF_FONT_SIZE_DEFAULT;
+}
 
 function loadViewMode(): DiffViewMode {
   try {
@@ -58,6 +75,15 @@ function AppContent() {
   const [filesPanelOpen, setFilesPanelOpenState] = useState(loadFilesPanelOpen);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [diffFontSize, setDiffFontSizeState] = useState(loadDiffFontSize);
+
+  const changeDiffFontSize = useCallback((delta: number) => {
+    setDiffFontSizeState((prev) => {
+      const next = Math.min(DIFF_FONT_SIZE_MAX, Math.max(DIFF_FONT_SIZE_MIN, prev + delta));
+      localStorage.setItem(DIFF_FONT_SIZE_KEY, String(next));
+      return next;
+    });
+  }, []);
   const { shikiTheme } = useTheme();
   const commitPanel = usePanelResize("diffmil.commitsPanelWidth", 300, 160, 600, "right");
   const filePanel = usePanelResize("diffmil.filesPanelWidth", 240, 140, 500, "left");
@@ -111,11 +137,17 @@ function AppContent() {
       } else if (e.ctrlKey && e.key === "/") {
         e.preventDefault();
         setViewMode(viewMode === "unified" ? "split" : "unified");
+      } else if (e.ctrlKey && e.key === "=") {
+        e.preventDefault();
+        changeDiffFontSize(1);
+      } else if (e.ctrlKey && e.key === "-") {
+        e.preventDefault();
+        changeDiffFontSize(-1);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode]);
+  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode, changeDiffFontSize]);
 
   const fetchCommits = useCallback(
     () =>
@@ -274,7 +306,7 @@ function AppContent() {
           )
         )}
 
-        <main className="flex-1 overflow-y-auto p-4">
+        <main className="flex-1 overflow-y-auto p-4" style={{ fontSize: diffFontSize }}>
           {diffLoading ? (
             <div className="flex items-center justify-center h-full text-gh-text-muted">
               Loading diff...

@@ -13,7 +13,7 @@ export function DiffChunk({ chunk, lineTokens }: DiffChunkProps) {
       <tr className="bg-gh-bg-tertiary">
         <td
           colSpan={3}
-          className="px-2 py-1 font-mono text-xs text-gh-text-muted"
+          className="px-2 py-1 font-mono text-[0.85em] text-gh-text-muted"
         >
           {chunk.header}
         </td>
