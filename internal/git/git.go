@@ -11,11 +11,12 @@ import (
 
 // Commit represents a single git commit.
 type Commit struct {
-	Hash    string `json:"hash"`
-	Short   string `json:"short"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	Date    string `json:"date"`
+	Hash    string   `json:"hash"`
+	Short   string   `json:"short"`
+	Subject string   `json:"subject"`
+	Author  string   `json:"author"`
+	Date    string   `json:"date"`
+	Tags    []string `json:"tags,omitempty"`
 }
 
 // Diff runs `git diff` with the given arguments and returns the output as an io.Reader.
@@ -47,11 +48,12 @@ func DiffShow(ctx context.Context, dir string, hash string) (io.Reader, error) {
 
 // Log returns the recent commit history.
 func Log(ctx context.Context, dir string, maxCount int) ([]Commit, error) {
-	// Format: hash<TAB>short<TAB>subject<TAB>author<TAB>date
-	format := "%H\t%h\t%s\t%an\t%ai"
+	// Format: hash<TAB>short<TAB>subject<TAB>author<TAB>date<TAB>refs
+	format := "%H\t%h\t%s\t%an\t%ai\t%D"
 	cmd := exec.CommandContext(ctx, "git", "log",
 		"--format="+format,
 		"--no-merges",
+		"--decorate=full",
 		"-n", strconv.Itoa(maxCount),
 	)
 	cmd.Dir = dir
@@ -66,20 +68,42 @@ func Log(ctx context.Context, dir string, maxCount int) ([]Commit, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 5)
+		parts := strings.SplitN(line, "\t", 6)
 		if len(parts) < 5 {
 			continue
 		}
-		commits = append(commits, Commit{
+		c := Commit{
 			Hash:    parts[0],
 			Short:   parts[1],
 			Subject: parts[2],
 			Author:  parts[3],
 			Date:    parts[4],
-		})
+		}
+		if len(parts) >= 6 {
+			c.Tags = parseTags(parts[5])
+		}
+		commits = append(commits, c)
 	}
 
 	return commits, nil
+}
+
+// parseTags extracts tag names from `git log --decorate=full` ref output.
+// Example input: "HEAD -> refs/heads/main, tag: refs/tags/v1.0.0, refs/remotes/origin/main"
+func parseTags(refs string) []string {
+	refs = strings.TrimSpace(refs)
+	if refs == "" {
+		return nil
+	}
+	var tags []string
+	for _, ref := range strings.Split(refs, ",") {
+		ref = strings.TrimSpace(ref)
+		const prefix = "tag: refs/tags/"
+		if strings.HasPrefix(ref, prefix) {
+			tags = append(tags, strings.TrimPrefix(ref, prefix))
+		}
+	}
+	return tags
 }
 
 // HasUncommittedChanges returns true if there are uncommitted changes (staged, unstaged, or untracked).

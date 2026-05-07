@@ -36,4 +36,5 @@ export interface Commit {
   subject: string;
   author: string;
   date: string;
+  tags?: string[];
 }

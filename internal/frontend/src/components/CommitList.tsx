@@ -65,6 +65,19 @@ function CommitEntry({
             <span className="text-xs text-gh-text-muted truncate">
               {formatDate(commit.date)}
             </span>
+            {commit.tags && commit.tags.length > 0 && (
+              <span className="ml-auto flex flex-wrap gap-1 justify-end shrink-0 max-w-[55%]">
+                {commit.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    title={tag}
+                    className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 truncate max-w-full"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           <div className="text-sm text-gh-text-primary truncate mt-0.5">
             {commit.subject}
