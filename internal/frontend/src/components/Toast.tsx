@@ -31,7 +31,7 @@ export function Toast({ message, visible, onDismiss }: ToastProps) {
 
   return (
     <div
-      className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border border-gh-border bg-gh-bg-secondary text-gh-text-primary text-sm transition-all duration-300 ${
+      className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-5 py-3 rounded-lg shadow-lg border border-gh-border bg-gh-bg-secondary text-gh-text-primary text-base transition-all duration-300 ${
         show ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
       }`}
     >
