@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { PanelLeft, PanelRight } from "lucide-react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
@@ -77,6 +77,17 @@ function AppContent() {
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [diffFontSize, setDiffFontSizeState] = useState(loadDiffFontSize);
 
+  const mainRef = useRef<HTMLElement | null>(null);
+  const lastEscRef = useRef(0);
+
+  const focusDiffArea = useCallback(() => {
+    setCommitsPanelOpenState(false);
+    localStorage.setItem(COMMITS_PANEL_KEY, "false");
+    setFilesPanelOpenState(false);
+    localStorage.setItem(FILES_PANEL_KEY, "false");
+    mainRef.current?.focus();
+  }, []);
+
   const changeDiffFontSize = useCallback((delta: number) => {
     setDiffFontSizeState((prev) => {
       const next = Math.min(DIFF_FONT_SIZE_MAX, Math.max(DIFF_FONT_SIZE_MIN, prev + delta));
@@ -143,11 +154,20 @@ function AppContent() {
       } else if (e.ctrlKey && e.key === "-") {
         e.preventDefault();
         changeDiffFontSize(-1);
+      } else if (e.key === "Escape" && !shortcutsHelpOpen) {
+        const now = Date.now();
+        if (now - lastEscRef.current < 500) {
+          e.preventDefault();
+          focusDiffArea();
+          lastEscRef.current = 0;
+        } else {
+          lastEscRef.current = now;
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode, changeDiffFontSize]);
+  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode, changeDiffFontSize, shortcutsHelpOpen, focusDiffArea]);
 
   const fetchCommits = useCallback(
     () =>
@@ -326,7 +346,12 @@ function AppContent() {
           )
         )}
 
-        <main className="flex-1 overflow-y-auto p-4" style={{ fontSize: diffFontSize }}>
+        <main
+          ref={mainRef}
+          tabIndex={-1}
+          className="flex-1 overflow-y-auto p-4 outline-none"
+          style={{ fontSize: diffFontSize }}
+        >
           {diffLoading ? (
             <div className="flex items-center justify-center h-full text-gh-text-muted">
               Loading diff...

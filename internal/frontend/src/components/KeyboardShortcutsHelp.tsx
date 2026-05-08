@@ -9,6 +9,7 @@ const SHORTCUTS = [
   { keys: ["Ctrl", "/"], description: "Unified / Split 表示切り替え" },
   { keys: ["Ctrl", "+"], description: "diffフォントサイズを拡大" },
   { keys: ["Ctrl", "-"], description: "diffフォントサイズを縮小" },
+  { keys: ["Esc", "Esc"], description: "両パネルを閉じてdiffにフォーカス" },
 ];
 
 interface KeyboardShortcutsHelpProps {
