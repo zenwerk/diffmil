@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ThemedToken } from "shiki";
 import type { DiffFile, DiffViewMode } from "../types";
 import { DiffChunk } from "./DiffChunk";
@@ -10,13 +11,22 @@ interface DiffViewerProps {
   file: DiffFile;
   shikiTheme: string;
   viewMode: DiffViewMode;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
-export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
+export function DiffViewer({
+  file,
+  shikiTheme,
+  viewMode,
+  collapsed,
+  onToggleCollapsed,
+}: DiffViewerProps) {
   const meta = STATUS_META[file.status] ?? STATUS_META.modified;
   const { ready, highlightLines } = useHighlighter();
 
   const allLineTokens = useMemo(() => {
+    if (collapsed) return null;
     if (!ready || file.chunks.length === 0) return null;
 
     const lang = detectLanguage(file.path);
@@ -43,7 +53,7 @@ export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
       result.push(chunkTokens);
     }
     return result;
-  }, [ready, file, shikiTheme, highlightLines]);
+  }, [ready, file, shikiTheme, highlightLines, collapsed]);
 
   const ChunkComponent = viewMode === "split" ? SplitDiffChunk : DiffChunk;
 
@@ -53,7 +63,16 @@ export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
       className="border border-gh-border rounded-md mb-4 overflow-hidden"
     >
       {/* File header */}
-      <div className="bg-gh-bg-secondary px-4 py-2 flex items-center gap-2 border-b border-gh-border sticky top-0 z-10">
+      <div
+        className={`bg-gh-bg-secondary px-4 py-2 flex items-center gap-2 sticky top-0 z-10 ${collapsed ? "" : "border-b border-gh-border"}`}
+      >
+        <button
+          onClick={onToggleCollapsed}
+          title={collapsed ? "Expand file" : "Collapse file"}
+          className="p-0.5 -ml-1 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors shrink-0"
+        >
+          {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        </button>
         <span className={`font-bold text-sm ${meta.colorClass}`}>
           {meta.label}
         </span>
@@ -79,7 +98,7 @@ export function DiffViewer({ file, shikiTheme, viewMode }: DiffViewerProps) {
       </div>
 
       {/* Diff content */}
-      {file.isBinary ? (
+      {collapsed ? null : file.isBinary ? (
         <div className="px-4 py-3 text-gh-text-muted text-sm italic">
           Binary file not shown
         </div>

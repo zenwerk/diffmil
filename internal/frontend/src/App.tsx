@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { PanelLeft, PanelRight } from "lucide-react";
+import { PanelLeft, PanelRight, FoldVertical, UnfoldVertical } from "lucide-react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -76,6 +76,28 @@ function AppContent() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [diffFontSize, setDiffFontSizeState] = useState(loadDiffFontSize);
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+
+  const toggleFileCollapsed = useCallback((path: string) => {
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const collapseAllFiles = useCallback(() => {
+    setCollapsedFiles(new Set((diffData?.files ?? []).map((f) => f.path)));
+  }, [diffData]);
+
+  const expandAllFiles = useCallback(() => {
+    setCollapsedFiles(new Set());
+  }, []);
+
+  useEffect(() => {
+    setCollapsedFiles(new Set());
+  }, [diffData]);
 
   const mainRef = useRef<HTMLElement | null>(null);
   const lastEscRef = useRef(0);
@@ -298,6 +320,24 @@ function AppContent() {
           </div>
         )}
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          {files.length > 0 && (
+            <>
+              <button
+                onClick={collapseAllFiles}
+                title="全ファイルを折りたたむ"
+                className="p-1.5 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
+              >
+                <FoldVertical size={16} />
+              </button>
+              <button
+                onClick={expandAllFiles}
+                title="全ファイルを展開"
+                className="p-1.5 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
+              >
+                <UnfoldVertical size={16} />
+              </button>
+            </>
+          )}
           <ViewModeToggle mode={viewMode} onChange={setViewMode} />
           <ThemeToggle />
           <button
@@ -369,6 +409,8 @@ function AppContent() {
                 file={file}
                 shikiTheme={shikiTheme}
                 viewMode={viewMode}
+                collapsed={collapsedFiles.has(file.path)}
+                onToggleCollapsed={() => toggleFileCollapsed(file.path)}
               />
             ))
           )}
