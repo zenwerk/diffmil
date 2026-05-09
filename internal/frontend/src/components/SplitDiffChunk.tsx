@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { ThemedToken } from "shiki";
 import type { DiffChunk, DiffLine } from "../types";
 import { TokenizedCode } from "./TokenizedCode";
-import { LINE_PREFIX } from "../constants/diff";
+import { LINE_PREFIX, LINE_BG } from "../constants/diff";
 
 interface SplitDiffChunkProps {
   chunk: DiffChunk;
@@ -13,11 +13,6 @@ interface SplitRow {
   left: { line: DiffLine; tokens?: ThemedToken[] } | null;
   right: { line: DiffLine; tokens?: ThemedToken[] } | null;
 }
-
-const LINE_BG: Record<string, string> = {
-  add: "bg-diff-addition-bg",
-  delete: "bg-diff-deletion-bg",
-};
 
 function buildSplitRows(
   chunk: DiffChunk,

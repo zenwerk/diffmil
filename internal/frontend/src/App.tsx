@@ -14,6 +14,7 @@ import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme, ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
+import { loadFromStorage, saveToStorage } from "./utils/storage";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -23,48 +24,31 @@ const DIFF_FONT_SIZE_DEFAULT = 14;
 const DIFF_FONT_SIZE_MIN = 10;
 const DIFF_FONT_SIZE_MAX = 20;
 
-function loadDiffFontSize(): number {
-  try {
-    const stored = localStorage.getItem(DIFF_FONT_SIZE_KEY);
-    if (stored) {
-      const n = parseInt(stored, 10);
-      if (!isNaN(n) && n >= DIFF_FONT_SIZE_MIN && n <= DIFF_FONT_SIZE_MAX) return n;
-    }
-  } catch {
-    // ignore
-  }
-  return DIFF_FONT_SIZE_DEFAULT;
-}
+const loadDiffFontSize = () =>
+  loadFromStorage(
+    DIFF_FONT_SIZE_KEY,
+    (s) => {
+      const n = parseInt(s, 10);
+      return !isNaN(n) && n >= DIFF_FONT_SIZE_MIN && n <= DIFF_FONT_SIZE_MAX
+        ? n
+        : undefined;
+    },
+    DIFF_FONT_SIZE_DEFAULT,
+  );
 
-function loadViewMode(): DiffViewMode {
-  try {
-    const stored = localStorage.getItem(VIEW_MODE_KEY);
-    if (stored === "unified" || stored === "split") return stored;
-  } catch {
-    // ignore
-  }
-  return "unified";
-}
+const loadViewMode = () =>
+  loadFromStorage<DiffViewMode>(
+    VIEW_MODE_KEY,
+    (s) => (s === "unified" || s === "split" ? s : undefined),
+    "unified",
+  );
 
-function loadCommitsPanelOpen(): boolean {
-  try {
-    const stored = localStorage.getItem(COMMITS_PANEL_KEY);
-    if (stored === "false") return false;
-  } catch {
-    // ignore
-  }
-  return true;
-}
-
-function loadFilesPanelOpen(): boolean {
-  try {
-    const stored = localStorage.getItem(FILES_PANEL_KEY);
-    if (stored === "false") return false;
-  } catch {
-    // ignore
-  }
-  return true;
-}
+const loadBoolPanel = (key: string) =>
+  loadFromStorage<boolean>(
+    key,
+    (s) => (s === "false" ? false : s === "true" ? true : undefined),
+    true,
+  );
 
 function AppContent() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
@@ -74,8 +58,8 @@ function AppContent() {
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewModeState] = useState<DiffViewMode>(loadViewMode);
-  const [commitsPanelOpen, setCommitsPanelOpenState] = useState(loadCommitsPanelOpen);
-  const [filesPanelOpen, setFilesPanelOpenState] = useState(loadFilesPanelOpen);
+  const [commitsPanelOpen, setCommitsPanelOpenState] = useState(() => loadBoolPanel(COMMITS_PANEL_KEY));
+  const [filesPanelOpen, setFilesPanelOpenState] = useState(() => loadBoolPanel(FILES_PANEL_KEY));
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [diffFontSize, setDiffFontSizeState] = useState(loadDiffFontSize);
@@ -108,19 +92,35 @@ function AppContent() {
 
   const mainRef = useRef<HTMLElement | null>(null);
   const lastEscRef = useRef(0);
+  const diffDataRef = useRef(diffData);
+  const collapsedFilesRef = useRef(collapsedFiles);
+  const viewModeRef = useRef(viewMode);
+  const shortcutsHelpOpenRef = useRef(shortcutsHelpOpen);
+  useEffect(() => { diffDataRef.current = diffData; }, [diffData]);
+  useEffect(() => { collapsedFilesRef.current = collapsedFiles; }, [collapsedFiles]);
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+  useEffect(() => { shortcutsHelpOpenRef.current = shortcutsHelpOpen; }, [shortcutsHelpOpen]);
+
+  const setCommitsPanelOpen = useCallback((next: boolean) => {
+    setCommitsPanelOpenState(next);
+    saveToStorage(COMMITS_PANEL_KEY, String(next));
+  }, []);
+
+  const setFilesPanelOpen = useCallback((next: boolean) => {
+    setFilesPanelOpenState(next);
+    saveToStorage(FILES_PANEL_KEY, String(next));
+  }, []);
 
   const focusDiffArea = useCallback(() => {
-    setCommitsPanelOpenState(false);
-    localStorage.setItem(COMMITS_PANEL_KEY, "false");
-    setFilesPanelOpenState(false);
-    localStorage.setItem(FILES_PANEL_KEY, "false");
+    setCommitsPanelOpen(false);
+    setFilesPanelOpen(false);
     mainRef.current?.focus();
-  }, []);
+  }, [setCommitsPanelOpen, setFilesPanelOpen]);
 
   const changeDiffFontSize = useCallback((delta: number) => {
     setDiffFontSizeState((prev) => {
       const next = Math.min(DIFF_FONT_SIZE_MAX, Math.max(DIFF_FONT_SIZE_MIN, prev + delta));
-      localStorage.setItem(DIFF_FONT_SIZE_KEY, String(next));
+      saveToStorage(DIFF_FONT_SIZE_KEY, String(next));
       return next;
     });
   }, []);
@@ -130,13 +130,13 @@ function AppContent() {
 
   const setViewMode = useCallback((mode: DiffViewMode) => {
     setViewModeState(mode);
-    localStorage.setItem(VIEW_MODE_KEY, mode);
+    saveToStorage(VIEW_MODE_KEY, mode);
   }, []);
 
   const toggleCommitsPanel = useCallback(() => {
     setCommitsPanelOpenState((prev) => {
       const next = !prev;
-      localStorage.setItem(COMMITS_PANEL_KEY, String(next));
+      saveToStorage(COMMITS_PANEL_KEY, String(next));
       return next;
     });
   }, []);
@@ -144,7 +144,7 @@ function AppContent() {
   const toggleFilesPanel = useCallback(() => {
     setFilesPanelOpenState((prev) => {
       const next = !prev;
-      localStorage.setItem(FILES_PANEL_KEY, String(next));
+      saveToStorage(FILES_PANEL_KEY, String(next));
       return next;
     });
   }, []);
@@ -159,13 +159,14 @@ function AppContent() {
         toggleFilesPanel();
       } else if (e.ctrlKey && (e.key === "j" || e.key === "k")) {
         e.preventDefault();
-        const files = diffData?.files ?? [];
+        const files = diffDataRef.current?.files ?? [];
         if (files.length === 0) return;
+        const collapsed = collapsedFilesRef.current;
         const visibleIdx: number[] = [];
         const ids: string[] = [];
         for (let i = 0; i < files.length; i++) {
           ids.push(`file-${encodeURIComponent(files[i].path)}`);
-          if (!collapsedFiles.has(files[i].path)) visibleIdx.push(i);
+          if (!collapsed.has(files[i].path)) visibleIdx.push(i);
         }
         if (visibleIdx.length === 0) return;
         const current = ids.findIndex((id) => {
@@ -184,14 +185,14 @@ function AppContent() {
         document.getElementById(ids[target])?.scrollIntoView({ behavior: "smooth", block: "start" });
       } else if (e.ctrlKey && e.key === "/") {
         e.preventDefault();
-        setViewMode(viewMode === "unified" ? "split" : "unified");
+        setViewMode(viewModeRef.current === "unified" ? "split" : "unified");
       } else if (e.ctrlKey && e.key === "=") {
         e.preventDefault();
         changeDiffFontSize(1);
       } else if (e.ctrlKey && e.key === "-") {
         e.preventDefault();
         changeDiffFontSize(-1);
-      } else if (e.key === "Escape" && !shortcutsHelpOpen) {
+      } else if (e.key === "Escape" && !shortcutsHelpOpenRef.current) {
         const now = Date.now();
         if (now - lastEscRef.current < 500) {
           e.preventDefault();
@@ -204,7 +205,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode, changeDiffFontSize, shortcutsHelpOpen, focusDiffArea, collapsedFiles]);
+  }, [toggleCommitsPanel, toggleFilesPanel, setViewMode, changeDiffFontSize, focusDiffArea]);
 
   const fetchCommits = useCallback(
     () =>

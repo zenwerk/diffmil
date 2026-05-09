@@ -1,3 +1,5 @@
+import { findById } from "../utils/list";
+
 export interface MonoFontOption {
   id: string;
   label: string;
@@ -19,5 +21,5 @@ export const MONO_FONTS: MonoFontOption[] = [
 export const DEFAULT_MONO_FONT = "fira-code";
 
 export function getMonoFontById(id: string): MonoFontOption | undefined {
-  return MONO_FONTS.find((f) => f.id === id);
+  return findById(MONO_FONTS, id);
 }

@@ -1,3 +1,5 @@
+import { basename as basenameOf } from "../utils/path";
+
 // Patterns matched against the file basename (case-insensitive).
 const BASENAME_EXACT = new Set([
   // Lock files
@@ -95,23 +97,18 @@ const PATH_SUBSTRINGS: string[] = [
   "/.terraform/",
 ];
 
-const HEADER_REGEX = /^[a-z0-9_-]+\.(?:lock|sum|toml)$/i;
-
 export function isAutoFoldPath(path: string): boolean {
   if (!path) return false;
   const lower = path.toLowerCase();
-  const slash = lower.lastIndexOf("/");
-  const basename = slash >= 0 ? lower.slice(slash + 1) : lower;
+  const base = basenameOf(lower);
 
-  if (BASENAME_EXACT.has(basename)) return true;
+  if (BASENAME_EXACT.has(base)) return true;
   for (const suf of SUFFIX_PATTERNS) {
-    if (basename.endsWith(suf)) return true;
+    if (base.endsWith(suf)) return true;
   }
   for (const sub of PATH_SUBSTRINGS) {
     if (lower.includes(sub)) return true;
   }
-  // Specific filename patterns
-  if (basename === "go.work.sum") return true;
-  if (HEADER_REGEX.test(basename) && basename.endsWith(".lock")) return true;
+  if (base === "go.work.sum") return true;
   return false;
 }

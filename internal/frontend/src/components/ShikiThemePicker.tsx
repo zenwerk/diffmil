@@ -1,30 +1,11 @@
-import { useEffect, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
+import { useDropdown } from "../hooks/useDropdown";
 import { SHIKI_THEMES } from "../constants/shikiThemes";
 
 export function ShikiThemePicker() {
   const { resolved, shikiTheme, setShikiTheme } = useTheme();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("mousedown", handler);
-    window.addEventListener("keydown", esc);
-    return () => {
-      window.removeEventListener("mousedown", handler);
-      window.removeEventListener("keydown", esc);
-    };
-  }, [open]);
+  const { open, setOpen, containerRef } = useDropdown();
 
   const themes = SHIKI_THEMES.filter((t) => t.type === resolved);
 

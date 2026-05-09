@@ -16,6 +16,7 @@ import {
   type ReactNode,
   createElement,
 } from "react";
+import { basename } from "../utils/path";
 
 // Highlighter instance shared across the app
 type Highlighter = Awaited<ReturnType<typeof createHighlighter>>;
@@ -107,7 +108,7 @@ const EXT_TO_LANG: Record<string, string> = {
 };
 
 export function detectLanguage(filePath: string): string {
-  const name = filePath.split("/").pop() ?? "";
+  const name = basename(filePath);
   const lower = name.toLowerCase();
 
   // Special filenames

@@ -1,3 +1,5 @@
+import { findById } from "../utils/list";
+
 export interface ShikiThemeOption {
   id: string;
   label: string;
@@ -53,5 +55,5 @@ export const DEFAULT_DARK_THEME = "github-dark";
 export const DEFAULT_LIGHT_THEME = "github-light";
 
 export function getThemeById(id: string): ShikiThemeOption | undefined {
-  return SHIKI_THEMES.find((t) => t.id === id);
+  return findById(SHIKI_THEMES, id);
 }

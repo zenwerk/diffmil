@@ -1,17 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
 import { DEFAULT_MONO_FONT, getMonoFontById, MONO_FONTS } from "../constants/monoFonts";
+import { loadFromStorage, saveToStorage } from "../utils/storage";
 
 const STORAGE_KEY = "diffmil.monoFont";
 
-function loadStored(): string {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && getMonoFontById(stored)) return stored;
-  } catch {
-    // ignore
-  }
-  return DEFAULT_MONO_FONT;
-}
+const loadStored = () =>
+  loadFromStorage(
+    STORAGE_KEY,
+    (s) => (getMonoFontById(s) ? s : undefined),
+    DEFAULT_MONO_FONT,
+  );
 
 function applyFont(id: string) {
   const opt = getMonoFontById(id);
@@ -33,11 +31,7 @@ export function useMonoFont() {
 
   const setFontId = useCallback((id: string) => {
     if (!getMonoFontById(id)) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, id);
-    } catch {
-      // ignore
-    }
+    saveToStorage(STORAGE_KEY, id);
     setFontIdState(id);
   }, []);
 

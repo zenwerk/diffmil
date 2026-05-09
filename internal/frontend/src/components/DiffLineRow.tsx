@@ -1,17 +1,12 @@
 import type { ThemedToken } from "shiki";
 import type { DiffLine } from "../types";
 import { TokenizedCode } from "./TokenizedCode";
-import { LINE_PREFIX } from "../constants/diff";
+import { LINE_PREFIX, LINE_BG_HOVER } from "../constants/diff";
 
 interface DiffLineRowProps {
   line: DiffLine;
   tokens?: ThemedToken[];
 }
-
-const LINE_BG: Record<string, string> = {
-  add: "bg-diff-addition-bg hover:bg-diff-add-hover",
-  delete: "bg-diff-deletion-bg hover:bg-diff-del-hover",
-};
 
 const LINE_BORDER: Record<string, string> = {
   add: "border-l-2 border-diff-addition-border",
@@ -20,7 +15,7 @@ const LINE_BORDER: Record<string, string> = {
 
 export function DiffLineRow({ line, tokens }: DiffLineRowProps) {
   return (
-    <tr className={`${LINE_BG[line.type] ?? "hover:bg-line-hover"}`}>
+    <tr className={`${LINE_BG_HOVER[line.type] ?? "hover:bg-line-hover"}`}>
       <td className="w-[1%] min-w-[50px] px-2 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap">
         {line.oldLineNumber ?? ""}
       </td>

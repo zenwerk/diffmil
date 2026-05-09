@@ -12,6 +12,7 @@ import {
   DEFAULT_LIGHT_THEME,
   getThemeById,
 } from "../constants/shikiThemes";
+import { loadFromStorage, saveToStorage } from "../utils/storage";
 
 export type ThemeMode = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
@@ -34,30 +35,22 @@ function applyTheme(theme: ResolvedTheme) {
   document.documentElement.setAttribute("data-theme", theme);
 }
 
-function loadStoredMode(): ThemeMode {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "system") {
-      return stored;
-    }
-  } catch {
-    // ignore
-  }
-  return "system";
-}
+const loadStoredMode = (): ThemeMode =>
+  loadFromStorage<ThemeMode>(
+    STORAGE_KEY,
+    (s) => (s === "light" || s === "dark" || s === "system" ? s : undefined),
+    "system",
+  );
 
-function loadShikiTheme(key: string, fallback: string, type: "light" | "dark"): string {
-  try {
-    const stored = localStorage.getItem(key);
-    if (stored) {
-      const meta = getThemeById(stored);
-      if (meta && meta.type === type) return stored;
-    }
-  } catch {
-    // ignore
-  }
-  return fallback;
-}
+const loadShikiTheme = (key: string, fallback: string, type: "light" | "dark"): string =>
+  loadFromStorage(
+    key,
+    (s) => {
+      const meta = getThemeById(s);
+      return meta && meta.type === type ? s : undefined;
+    },
+    fallback,
+  );
 
 interface ThemeContextValue {
   mode: ThemeMode;
@@ -78,10 +71,9 @@ export function useTheme(): ThemeContextValue {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const initialMode = loadStoredMode();
-  const [mode, setModeState] = useState<ThemeMode>(initialMode);
+  const [mode, setModeState] = useState<ThemeMode>(loadStoredMode);
   const [resolved, setResolved] = useState<ResolvedTheme>(() =>
-    resolveTheme(initialMode),
+    resolveTheme(loadStoredMode()),
   );
   const [darkShiki, setDarkShiki] = useState(() =>
     loadShikiTheme(SHIKI_DARK_KEY, DEFAULT_DARK_THEME, "dark"),
@@ -92,34 +84,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode);
-    localStorage.setItem(STORAGE_KEY, newMode);
+    saveToStorage(STORAGE_KEY, newMode);
     const r = resolveTheme(newMode);
     applyTheme(r);
     setResolved(r);
   }, []);
 
-  const setShikiTheme = useCallback(
-    (id: string) => {
-      const meta = getThemeById(id);
-      if (!meta) return;
-      if (meta.type === "dark") {
-        setDarkShiki(id);
-        try {
-          localStorage.setItem(SHIKI_DARK_KEY, id);
-        } catch {
-          // ignore
-        }
-      } else {
-        setLightShiki(id);
-        try {
-          localStorage.setItem(SHIKI_LIGHT_KEY, id);
-        } catch {
-          // ignore
-        }
-      }
-    },
-    [],
-  );
+  const setShikiTheme = useCallback((id: string) => {
+    const meta = getThemeById(id);
+    if (!meta) return;
+    if (meta.type === "dark") {
+      setDarkShiki(id);
+      saveToStorage(SHIKI_DARK_KEY, id);
+    } else {
+      setLightShiki(id);
+      saveToStorage(SHIKI_LIGHT_KEY, id);
+    }
+  }, []);
 
   useEffect(() => {
     const r = resolveTheme(mode);

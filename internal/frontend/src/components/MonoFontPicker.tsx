@@ -1,29 +1,10 @@
-import { useEffect, useRef, useState } from "react";
 import { Type } from "lucide-react";
 import { useMonoFont } from "../hooks/useMonoFont";
+import { useDropdown } from "../hooks/useDropdown";
 
 export function MonoFontPicker() {
   const { fontId, setFontId, fonts } = useMonoFont();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("mousedown", handler);
-    window.addEventListener("keydown", esc);
-    return () => {
-      window.removeEventListener("mousedown", handler);
-      window.removeEventListener("keydown", esc);
-    };
-  }, [open]);
+  const { open, setOpen, containerRef } = useDropdown();
 
   return (
     <div className="relative" ref={containerRef}>
