@@ -378,9 +378,11 @@ function AppContent() {
                 />
               </div>
               <div
-                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
+                className="absolute -right-1 top-0 bottom-0 w-2.5 cursor-col-resize z-10 group/handle"
                 onMouseDown={commitPanel.onMouseDown}
-              />
+              >
+                <div className="absolute right-1 top-0 bottom-0 w-1 group-hover/handle:bg-blue-500/40 group-active/handle:bg-blue-500/60 transition-colors" />
+              </div>
             </aside>
           ) : (
             <div className="shrink-0 border-r border-gh-border bg-gh-bg-secondary flex items-start pt-2 px-1">
@@ -432,9 +434,11 @@ function AppContent() {
               style={{ width: filePanel.width }}
             >
               <div
-                className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
+                className="absolute -left-1 top-0 bottom-0 w-2.5 cursor-col-resize z-10 group/handle"
                 onMouseDown={filePanel.onMouseDown}
-              />
+              >
+                <div className="absolute left-1 top-0 bottom-0 w-1 group-hover/handle:bg-blue-500/40 group-active/handle:bg-blue-500/60 transition-colors" />
+              </div>
               <div className="flex-1 overflow-hidden">
                 <FileList files={files} onCollapse={toggleFilesPanel} />
               </div>
