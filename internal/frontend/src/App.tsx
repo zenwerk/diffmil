@@ -161,19 +161,27 @@ function AppContent() {
         e.preventDefault();
         const files = diffData?.files ?? [];
         if (files.length === 0) return;
-        const ids = files.map((f) => `file-${encodeURIComponent(f.path)}`);
+        const visibleIdx: number[] = [];
+        const ids: string[] = [];
+        for (let i = 0; i < files.length; i++) {
+          ids.push(`file-${encodeURIComponent(files[i].path)}`);
+          if (!collapsedFiles.has(files[i].path)) visibleIdx.push(i);
+        }
+        if (visibleIdx.length === 0) return;
         const current = ids.findIndex((id) => {
           const el = document.getElementById(id);
           if (!el) return false;
           return el.getBoundingClientRect().top >= -1;
         });
-        let next: number;
+        let target: number;
         if (e.key === "j") {
-          next = current === -1 ? 0 : Math.min(current + 1, ids.length - 1);
+          const nextVisible = visibleIdx.find((i) => i > (current === -1 ? -1 : current));
+          target = nextVisible ?? visibleIdx[visibleIdx.length - 1];
         } else {
-          next = current <= 0 ? 0 : current - 1;
+          const prevVisible = [...visibleIdx].reverse().find((i) => i < (current === -1 ? files.length : current));
+          target = prevVisible ?? visibleIdx[0];
         }
-        document.getElementById(ids[next])?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById(ids[target])?.scrollIntoView({ behavior: "smooth", block: "start" });
       } else if (e.ctrlKey && e.key === "/") {
         e.preventDefault();
         setViewMode(viewMode === "unified" ? "split" : "unified");
@@ -196,7 +204,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode, changeDiffFontSize, shortcutsHelpOpen, focusDiffArea]);
+  }, [toggleCommitsPanel, toggleFilesPanel, diffData, viewMode, setViewMode, changeDiffFontSize, shortcutsHelpOpen, focusDiffArea, collapsedFiles]);
 
   const fetchCommits = useCallback(
     () =>
