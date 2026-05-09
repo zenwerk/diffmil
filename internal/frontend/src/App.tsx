@@ -11,6 +11,7 @@ import { KeyboardShortcutsHelp } from "./components/KeyboardShortcutsHelp";
 import { HighlighterProvider } from "./hooks/useHighlighter";
 import { useTheme, ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
+import { isAutoFoldPath } from "./constants/autoFold";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -96,7 +97,11 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    setCollapsedFiles(new Set());
+    const auto = new Set<string>();
+    for (const f of diffData?.files ?? []) {
+      if (isAutoFoldPath(f.path)) auto.add(f.path);
+    }
+    setCollapsedFiles(auto);
   }, [diffData]);
 
   const mainRef = useRef<HTMLElement | null>(null);
