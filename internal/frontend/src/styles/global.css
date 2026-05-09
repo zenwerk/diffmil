@@ -1,5 +1,21 @@
 @import "@fontsource-variable/fira-code";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/source-code-pro";
+@import "@fontsource-variable/cascadia-code";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/700.css";
+@import "@fontsource/monaspace-neon/400.css";
+@import "@fontsource/monaspace-neon/500.css";
+@import "@fontsource/monaspace-neon/700.css";
 @import "tailwindcss";
+
+:root {
+  --font-mono-active: "Fira Code Variable";
+  --font-mono-fallback: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-mono-feature-settings: "liga" 1, "calt" 1;
+}
 
 /* Theme tokens as CSS custom properties, switched by data-theme attribute */
 :root,
@@ -76,8 +92,7 @@ html[data-theme="light"] {
   --color-diff-del-hover: var(--color-diff-del-line-hover);
   --color-line-hover: var(--color-normal-line-hover);
 
-  --font-mono: "Fira Code Variable", ui-monospace, SFMono-Regular, "SF Mono",
-    Menlo, Consolas, "Liberation Mono", monospace;
+  --font-mono: var(--font-mono-active), var(--font-mono-fallback);
 }
 
 html,
@@ -101,6 +116,6 @@ button {
 }
 
 .font-mono {
-  font-feature-settings: "liga" 1, "calt" 1;
+  font-feature-settings: var(--font-mono-feature-settings);
 }
 

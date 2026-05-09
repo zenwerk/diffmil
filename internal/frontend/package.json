@@ -15,7 +15,12 @@
     }
   },
   "dependencies": {
+    "@fontsource-variable/cascadia-code": "^5.2.2",
     "@fontsource-variable/fira-code": "^5.2.7",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/source-code-pro": "^5.2.7",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/monaspace-neon": "^5.2.5",
     "lucide-react": "^1.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
