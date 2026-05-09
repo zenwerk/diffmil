@@ -6,6 +6,7 @@ import { DiffChunk } from "./DiffChunk";
 import { SplitDiffChunk } from "./SplitDiffChunk";
 import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 import { STATUS_META } from "../constants/status";
+import { isAutoFoldPath } from "../constants/autoFold";
 
 interface DiffViewerProps {
   file: DiffFile;
@@ -23,6 +24,7 @@ export function DiffViewer({
   onToggleCollapsed,
 }: DiffViewerProps) {
   const meta = STATUS_META[file.status] ?? STATUS_META.modified;
+  const autoFold = isAutoFoldPath(file.path);
   const { ready, highlightLines } = useHighlighter();
 
   const allLineTokens = useMemo(() => {
@@ -73,10 +75,13 @@ export function DiffViewer({
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
         </button>
-        <span className={`font-bold text-sm ${meta.colorClass}`}>
+        <span className={`font-bold text-sm ${autoFold ? "text-gh-text-muted/60" : meta.colorClass}`}>
           {meta.label}
         </span>
-        <span className="font-mono text-sm text-gh-text-primary truncate">
+        <span
+          className={`font-mono text-sm truncate ${autoFold ? "text-gh-text-muted/70 italic" : "text-gh-text-primary"}`}
+          title={autoFold ? "自動折りたたみ対象（自動生成・lockファイルなど）" : undefined}
+        >
           {file.oldPath ? (
             <>
               <span className="text-gh-text-muted">{file.oldPath}</span>
