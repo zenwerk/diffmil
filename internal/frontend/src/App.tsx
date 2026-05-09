@@ -5,6 +5,7 @@ import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
 import { DiffViewer } from "./components/DiffViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { ShikiThemePicker } from "./components/ShikiThemePicker";
 import { ViewModeToggle } from "./components/ViewModeToggle";
 import { Toast } from "./components/Toast";
 import { KeyboardShortcutsHelp } from "./components/KeyboardShortcutsHelp";
@@ -344,6 +345,7 @@ function AppContent() {
             </>
           )}
           <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+          <ShikiThemePicker />
           <ThemeToggle />
           <button
             onClick={() => setShortcutsHelpOpen(true)}

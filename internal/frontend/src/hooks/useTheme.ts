@@ -7,11 +7,18 @@ import {
   createElement,
   type ReactNode,
 } from "react";
+import {
+  DEFAULT_DARK_THEME,
+  DEFAULT_LIGHT_THEME,
+  getThemeById,
+} from "../constants/shikiThemes";
 
 export type ThemeMode = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "diffmil.theme";
+const SHIKI_DARK_KEY = "diffmil.shikiTheme.dark";
+const SHIKI_LIGHT_KEY = "diffmil.shikiTheme.light";
 
 function getSystemTheme(): ResolvedTheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -39,11 +46,25 @@ function loadStoredMode(): ThemeMode {
   return "system";
 }
 
+function loadShikiTheme(key: string, fallback: string, type: "light" | "dark"): string {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      const meta = getThemeById(stored);
+      if (meta && meta.type === type) return stored;
+    }
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
+
 interface ThemeContextValue {
   mode: ThemeMode;
   setMode: (mode: ThemeMode) => void;
   resolved: ResolvedTheme;
-  shikiTheme: "github-dark" | "github-light";
+  shikiTheme: string;
+  setShikiTheme: (id: string) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -62,6 +83,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [resolved, setResolved] = useState<ResolvedTheme>(() =>
     resolveTheme(initialMode),
   );
+  const [darkShiki, setDarkShiki] = useState(() =>
+    loadShikiTheme(SHIKI_DARK_KEY, DEFAULT_DARK_THEME, "dark"),
+  );
+  const [lightShiki, setLightShiki] = useState(() =>
+    loadShikiTheme(SHIKI_LIGHT_KEY, DEFAULT_LIGHT_THEME, "light"),
+  );
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode);
@@ -70,6 +97,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyTheme(r);
     setResolved(r);
   }, []);
+
+  const setShikiTheme = useCallback(
+    (id: string) => {
+      const meta = getThemeById(id);
+      if (!meta) return;
+      if (meta.type === "dark") {
+        setDarkShiki(id);
+        try {
+          localStorage.setItem(SHIKI_DARK_KEY, id);
+        } catch {
+          // ignore
+        }
+      } else {
+        setLightShiki(id);
+        try {
+          localStorage.setItem(SHIKI_LIGHT_KEY, id);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const r = resolveTheme(mode);
@@ -88,11 +138,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener("change", handler);
   }, [mode]);
 
-  const shikiTheme = resolved === "dark" ? "github-dark" : "github-light";
+  const shikiTheme = resolved === "dark" ? darkShiki : lightShiki;
 
   return createElement(
     ThemeContext.Provider,
-    { value: { mode, setMode, resolved, shikiTheme } },
+    { value: { mode, setMode, resolved, shikiTheme, setShikiTheme } },
     children,
   );
 }

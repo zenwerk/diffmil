@@ -1,8 +1,10 @@
 import {
   createHighlighter,
   bundledLanguages,
+  bundledThemes,
   type ThemedToken,
   type BundledLanguage,
+  type BundledTheme,
 } from "shiki";
 import {
   createContext,
@@ -142,19 +144,21 @@ const PRELOAD_LANGS = [
   "dockerfile",
 ];
 
-const THEMES = ["github-dark", "github-light"] as const;
+const PRELOAD_THEMES = ["github-dark", "github-light"] as const;
 
 export function HighlighterProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [langVersion, setLangVersion] = useState(0);
+  const [version, setVersion] = useState(0);
   const hlRef = useRef<Highlighter | null>(null);
   const loadedLangs = useRef<Set<string>>(new Set());
   const loadingLangs = useRef<Set<string>>(new Set());
+  const loadedThemes = useRef<Set<string>>(new Set());
+  const loadingThemes = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     createHighlighter({
-      themes: [...THEMES],
+      themes: [...PRELOAD_THEMES],
       langs: PRELOAD_LANGS,
     })
       .then((hl) => {
@@ -162,6 +166,9 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
           hlRef.current = hl;
           for (const lang of PRELOAD_LANGS) {
             loadedLangs.current.add(lang);
+          }
+          for (const t of PRELOAD_THEMES) {
+            loadedThemes.current.add(t);
           }
           setReady(true);
         }
@@ -186,15 +193,34 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
       .then(() => {
         loadedLangs.current.add(lang);
         loadingLangs.current.delete(lang);
-        setLangVersion((v) => v + 1);
+        setVersion((v) => v + 1);
       })
       .catch(() => {
         loadingLangs.current.delete(lang);
       });
   }, []);
 
-  // langVersion in deps ensures a new function reference when a language finishes loading,
-  // so consumers' useMemo re-runs without needing to know about langVersion directly.
+  const loadTheme = useCallback((theme: string) => {
+    if (loadedThemes.current.has(theme) || loadingThemes.current.has(theme)) return;
+    if (!(theme in bundledThemes)) return;
+
+    const hl = hlRef.current;
+    if (!hl) return;
+
+    loadingThemes.current.add(theme);
+    hl.loadTheme(theme as BundledTheme)
+      .then(() => {
+        loadedThemes.current.add(theme);
+        loadingThemes.current.delete(theme);
+        setVersion((v) => v + 1);
+      })
+      .catch(() => {
+        loadingThemes.current.delete(theme);
+      });
+  }, []);
+
+  // version in deps ensures a new function reference when a language/theme finishes loading,
+  // so consumers' useMemo re-runs without needing to know about version directly.
   const highlightLines = useCallback(
     (lines: string[], lang: string, theme: string): ThemedToken[][] => {
       const hl = hlRef.current;
@@ -207,18 +233,25 @@ export function HighlighterProvider({ children }: { children: ReactNode }) {
         return [];
       }
 
+      if (!loadedThemes.current.has(theme)) {
+        if (!loadingThemes.current.has(theme)) {
+          loadTheme(theme);
+        }
+        return [];
+      }
+
       try {
         const code = lines.join("\n");
         const result = hl.codeToTokens(code, {
           lang: lang as BundledLanguage,
-          theme: theme as "github-dark" | "github-light",
+          theme: theme as BundledTheme,
         });
         return result.tokens;
       } catch {
         return [];
       }
     },
-    [loadLanguage, langVersion],
+    [loadLanguage, loadTheme, version],
   );
 
   return createElement(
