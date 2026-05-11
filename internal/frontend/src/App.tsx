@@ -16,6 +16,8 @@ import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
 import { useComments, listCommitsWithComments } from "./hooks/useComments";
+import { useWorkspaces } from "./hooks/useWorkspaces";
+import { WorkspacePicker } from "./components/WorkspacePicker";
 import { copyToClipboard, formatAllThreadsPrompt, toCommitContext } from "./utils/commentPrompt";
 
 const EMPTY_THREADS: CommentThread[] = [];
@@ -55,6 +57,10 @@ const loadBoolPanel = (key: string) =>
   );
 
 function AppContent() {
+  const { workspaces, activeId, setActiveId, refresh: refreshWorkspaces } = useWorkspaces();
+  const wsId = activeId;
+  const wsParam = wsId ? `?ws=${encodeURIComponent(wsId)}` : "";
+
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [commits, setCommits] = useState<Commit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
@@ -86,14 +92,14 @@ function AppContent() {
     setCollapsedFiles(new Set());
   }, []);
 
-  const { threads, addThread, updateMessage, removeThread } = useComments(selectedCommit);
+  const { threads, addThread, updateMessage, removeThread } = useComments(wsId, selectedCommit);
 
   const [commitsWithComments, setCommitsWithComments] = useState<Set<string>>(() =>
-    listCommitsWithComments(),
+    listCommitsWithComments(wsId),
   );
   useEffect(() => {
-    setCommitsWithComments(listCommitsWithComments());
-  }, [threads, selectedCommit]);
+    setCommitsWithComments(listCommitsWithComments(wsId));
+  }, [threads, selectedCommit, wsId]);
 
   const threadsByFile = useMemo(() => {
     const map = new Map<string, CommentThread[]>();
@@ -247,20 +253,23 @@ function AppContent() {
 
   const fetchCommits = useCallback(
     () =>
-      fetch("/_/api/commits")
+      fetch("/_/api/commits" + wsParam)
         .then((res) => {
           if (!res.ok) return [] as Commit[];
           return res.json() as Promise<Commit[]>;
         })
         .catch(() => [] as Commit[]),
-    [],
+    [wsParam],
   );
 
   const dismissToast = useCallback(() => setToastMessage(null), []);
 
   useEffect(() => {
+    // Wait until a workspace is selected before issuing scoped fetches.
+    if (workspaces.length > 0 && !wsId) return;
+    setLoading(true);
     Promise.all([
-      fetch("/_/api/diff").then((res) => {
+      fetch("/_/api/diff" + wsParam).then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<DiffResponse>;
       }),
@@ -269,19 +278,20 @@ function AppContent() {
       .then(([diff, commitList]) => {
         setDiffData(diff);
         setCommits(commitList);
+        setSelectedCommit(null);
         setLoading(false);
       })
       .catch((err) => {
         setError(err.message);
         setLoading(false);
       });
-  }, [fetchCommits]);
+  }, [fetchCommits, wsParam, wsId, workspaces.length]);
 
   useEffect(() => {
     const es = new EventSource("/_/events");
 
     es.addEventListener("update", () => {
-      fetch("/_/api/diff")
+      fetch("/_/api/diff" + wsParam)
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           return res.json() as Promise<DiffResponse>;
@@ -300,28 +310,38 @@ function AppContent() {
       });
     });
 
+    es.addEventListener("workspaces-changed", () => {
+      refreshWorkspaces();
+    });
+
     es.onerror = () => {};
 
     return () => es.close();
-  }, []);
+  }, [wsParam, fetchCommits, refreshWorkspaces]);
 
-  const handleSelectCommit = useCallback((hash: string) => {
-    setSelectedCommit(hash);
-    setDiffLoading(true);
-    fetch(`/_/api/diff?commit=${encodeURIComponent(hash)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<DiffResponse>;
-      })
-      .then((data) => {
-        setDiffData(data);
-        setDiffLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setDiffLoading(false);
-      });
-  }, []);
+  const handleSelectCommit = useCallback(
+    (hash: string) => {
+      setSelectedCommit(hash);
+      setDiffLoading(true);
+      const params = new URLSearchParams();
+      if (wsId) params.set("ws", wsId);
+      params.set("commit", hash);
+      fetch(`/_/api/diff?${params.toString()}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json() as Promise<DiffResponse>;
+        })
+        .then((data) => {
+          setDiffData(data);
+          setDiffLoading(false);
+        })
+        .catch((err) => {
+          setError(err.message);
+          setDiffLoading(false);
+        });
+    },
+    [wsId],
+  );
 
   if (loading) {
     return (
@@ -354,6 +374,11 @@ function AppContent() {
         <h1 className="text-sm font-semibold text-gh-text-primary shrink-0">
           diffmil
         </h1>
+        <WorkspacePicker
+          workspaces={workspaces}
+          activeId={activeId}
+          onSelect={setActiveId}
+        />
         {selectedCommitInfo && (
           <div className="flex items-center gap-2 min-w-0 group relative">
             <span className="font-mono text-xs text-gh-text-muted shrink-0">

@@ -30,6 +30,13 @@ export interface DiffLine {
 
 export type DiffViewMode = "unified" | "split";
 
+export interface Workspace {
+  id: string;
+  dir: string;
+  label: string;
+  addedAt: string;
+}
+
 export interface Commit {
   hash: string;
   short: string;

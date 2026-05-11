@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluekeyes/go-gitdiff/gitdiff"
@@ -89,12 +91,23 @@ Options:
 	url := fmt.Sprintf("http://localhost:%d", *port)
 
 	if probeServer(url) {
-		if err := postDiff(url, cfg.InitialDiff); err != nil {
-			log.Fatalf("failed to send diff to existing server: %v", err)
-		}
-		fmt.Fprintf(os.Stderr, "diffmil: sent diff to existing server at %s\n", url)
-		if !*noOpen {
-			browser.OpenURL(url)
+		if cfg.RepoDir != "" {
+			ws, err := postWorkspace(url, cfg.RepoDir)
+			if err != nil {
+				log.Fatalf("failed to register workspace: %v", err)
+			}
+			fmt.Fprintf(os.Stderr, "diffmil: registered workspace %q on existing server at %s\n", ws.Label, url)
+			if !*noOpen {
+				browser.OpenURL(url + "?ws=" + ws.ID)
+			}
+		} else {
+			if err := postDiff(url, cfg.InitialDiff); err != nil {
+				log.Fatalf("failed to send diff to existing server: %v", err)
+			}
+			fmt.Fprintf(os.Stderr, "diffmil: sent diff to existing server at %s\n", url)
+			if !*noOpen {
+				browser.OpenURL(url)
+			}
 		}
 		return
 	}
@@ -152,15 +165,38 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 	}
 
 	// Watch git repository for changes
-	if cfg.RepoDir != "" {
-		gw, err := watcher.New(cfg.RepoDir, func() {
+	var (
+		watchersMu sync.Mutex
+		watchers   = make(map[string]*watcher.GitWatcher)
+	)
+	closeWatchers := func() {
+		watchersMu.Lock()
+		defer watchersMu.Unlock()
+		for _, gw := range watchers {
+			gw.Close()
+		}
+	}
+	defer closeWatchers()
+
+	startWatcher := func(dir, id string) {
+		gw, err := watcher.New(dir, func() {
 			state.NotifyCommitsChanged()
 		})
 		if err != nil {
-			log.Printf("warning: failed to start git watcher: %v", err)
-		} else {
-			defer gw.Close()
+			log.Printf("warning: failed to start git watcher for %s: %v", dir, err)
+			return
 		}
+		watchersMu.Lock()
+		watchers[id] = gw
+		watchersMu.Unlock()
+	}
+
+	state.WorkspaceAdded = func(ws *server.Workspace) {
+		startWatcher(ws.Dir, ws.ID)
+	}
+
+	for _, ws := range state.Workspaces() {
+		startWatcher(ws.Dir, ws.ID)
 	}
 
 	addr := fmt.Sprintf(":%d", port)
@@ -399,6 +435,34 @@ func postDiff(baseURL string, diffResp *diff.DiffResponse) error {
 		return fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+type workspaceResponse struct {
+	ID    string `json:"id"`
+	Dir   string `json:"dir"`
+	Label string `json:"label"`
+}
+
+func postWorkspace(baseURL, dir string) (*workspaceResponse, error) {
+	body, err := json.Marshal(map[string]string{"dir": dir})
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(baseURL+"/_/api/workspaces", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var ws workspaceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ws); err != nil {
+		return nil, err
+	}
+	return &ws, nil
 }
 
 // --- Config building ---

@@ -24,33 +24,108 @@ type Config struct {
 
 // State holds mutable server state protected by a mutex.
 type State struct {
-	mu          sync.RWMutex
-	currentDiff *diff.DiffResponse
-	repoDir     string
+	mu sync.RWMutex
+	// workspaces is the ordered list of registered workspaces.
+	// The order reflects the addition order; the first one is treated as the default.
+	workspaces []*Workspace
+	// diffs holds the latest diff response per workspace.
+	diffs map[string]*diff.DiffResponse
 
 	subMu       sync.RWMutex
 	subscribers map[chan string]struct{}
 
 	shutdownCh chan struct{}
 	restartCh  chan struct{}
+
+	// WorkspaceAdded is invoked synchronously when a new workspace is registered.
+	// Callers can use it to start per-workspace background work (e.g. a git watcher).
+	WorkspaceAdded func(ws *Workspace)
 }
 
 func (s *State) ShutdownCh() <-chan struct{} { return s.shutdownCh }
 func (s *State) RestartCh() <-chan struct{}  { return s.restartCh }
 
 func newState(cfg Config) *State {
-	return &State{
-		currentDiff: cfg.InitialDiff,
-		repoDir:     cfg.RepoDir,
+	s := &State{
+		diffs:       make(map[string]*diff.DiffResponse),
 		subscribers: make(map[chan string]struct{}),
 		shutdownCh:  make(chan struct{}),
 		restartCh:   make(chan struct{}),
 	}
+	if cfg.RepoDir != "" {
+		ws := newWorkspace(cfg.RepoDir)
+		s.workspaces = append(s.workspaces, &ws)
+		if cfg.InitialDiff != nil {
+			s.diffs[ws.ID] = cfg.InitialDiff
+		}
+	}
+	return s
 }
 
-func (s *State) UpdateDiff(resp *diff.DiffResponse) {
+// Workspaces returns a snapshot of the current workspace list.
+func (s *State) Workspaces() []Workspace {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Workspace, 0, len(s.workspaces))
+	for _, w := range s.workspaces {
+		out = append(out, *w)
+	}
+	return out
+}
+
+// findWorkspace returns the workspace for the given ID, or nil if not found.
+// If id is empty, the first workspace (default) is returned when available.
+func (s *State) findWorkspace(id string) *Workspace {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if id == "" {
+		if len(s.workspaces) > 0 {
+			return s.workspaces[0]
+		}
+		return nil
+	}
+	for _, w := range s.workspaces {
+		if w.ID == id {
+			return w
+		}
+	}
+	return nil
+}
+
+// findWorkspaceByDir locates a workspace by its absolute directory path.
+func (s *State) findWorkspaceByDir(dir string) *Workspace {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, w := range s.workspaces {
+		if w.Dir == dir {
+			return w
+		}
+	}
+	return nil
+}
+
+// AddWorkspace registers a workspace for the given absolute directory.
+// If a workspace for that directory already exists it is returned without modification.
+// The bool return value is true when a new workspace was added.
+func (s *State) AddWorkspace(dir string) (*Workspace, bool) {
+	if existing := s.findWorkspaceByDir(dir); existing != nil {
+		return existing, false
+	}
+	ws := newWorkspace(dir)
 	s.mu.Lock()
-	s.currentDiff = resp
+	s.workspaces = append(s.workspaces, &ws)
+	s.mu.Unlock()
+	if s.WorkspaceAdded != nil {
+		s.WorkspaceAdded(&ws)
+	}
+	s.notify("workspaces-changed")
+	return &ws, true
+}
+
+// SetDiff replaces the cached diff for the given workspace ID.
+func (s *State) SetDiff(wsID string, resp *diff.DiffResponse) {
+	s.mu.Lock()
+	s.diffs[wsID] = resp
 	s.mu.Unlock()
 	s.notify("update")
 }
@@ -60,10 +135,13 @@ func (s *State) NotifyCommitsChanged() {
 	s.notify("commits-changed")
 }
 
-func (s *State) getDiff() *diff.DiffResponse {
+func (s *State) getDiff(wsID string) *diff.DiffResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.currentDiff
+	if wsID == "" && len(s.workspaces) > 0 {
+		wsID = s.workspaces[0].ID
+	}
+	return s.diffs[wsID]
 }
 
 func (s *State) subscribe() chan string {
@@ -100,6 +178,8 @@ func New(cfg Config) (http.Handler, *State) {
 	mux.HandleFunc("GET /_/api/diff", handleGetDiff(state))
 	mux.HandleFunc("POST /_/api/diff", handlePostDiff(state))
 	mux.HandleFunc("GET /_/api/commits", handleCommits(state))
+	mux.HandleFunc("GET /_/api/workspaces", handleListWorkspaces(state))
+	mux.HandleFunc("POST /_/api/workspaces", handleAddWorkspace(state))
 	mux.HandleFunc("GET /_/api/status", handleStatus())
 	mux.HandleFunc("POST /_/api/shutdown", handleShutdown(state))
 	mux.HandleFunc("POST /_/api/restart", handleRestart(state))
@@ -124,9 +204,16 @@ func handleGetDiff(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
+		wsID := r.URL.Query().Get("ws")
+		ws := state.findWorkspace(wsID)
+
 		commitHash := r.URL.Query().Get("commit")
-		if commitHash == "" || state.repoDir == "" {
-			json.NewEncoder(w).Encode(state.getDiff())
+		if commitHash == "" || ws == nil {
+			if ws != nil {
+				json.NewEncoder(w).Encode(state.getDiff(ws.ID))
+				return
+			}
+			json.NewEncoder(w).Encode(state.getDiff(""))
 			return
 		}
 
@@ -135,9 +222,9 @@ func handleGetDiff(state *State) http.HandlerFunc {
 		var err error
 
 		if commitHash == workingTreeHash {
-			reader, err = gitcmd.DiffUncommitted(ctx, state.repoDir)
+			reader, err = gitcmd.DiffUncommitted(ctx, ws.Dir)
 		} else {
-			reader, err = gitcmd.DiffShow(ctx, state.repoDir, commitHash)
+			reader, err = gitcmd.DiffShow(ctx, ws.Dir, commitHash)
 		}
 		if err != nil {
 			http.Error(w, `{"error":"failed to get diff"}`, http.StatusInternalServerError)
@@ -160,7 +247,13 @@ func handlePostDiff(state *State) http.HandlerFunc {
 			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
 			return
 		}
-		state.UpdateDiff(&resp)
+		wsID := r.URL.Query().Get("ws")
+		ws := state.findWorkspace(wsID)
+		if ws == nil {
+			http.Error(w, `{"error":"no workspace"}`, http.StatusBadRequest)
+			return
+		}
+		state.SetDiff(ws.ID, &resp)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"ok":true}`))
 	}
@@ -170,7 +263,9 @@ func handleCommits(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		if state.repoDir == "" {
+		wsID := r.URL.Query().Get("ws")
+		ws := state.findWorkspace(wsID)
+		if ws == nil || ws.Dir == "" {
 			w.Write([]byte("[]"))
 			return
 		}
@@ -186,11 +281,11 @@ func handleCommits(state *State) http.HandlerFunc {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			commits, logErr = gitcmd.Log(ctx, state.repoDir, 50)
+			commits, logErr = gitcmd.Log(ctx, ws.Dir, 50)
 		}()
 		go func() {
 			defer wg.Done()
-			hasUncommitted = gitcmd.HasUncommittedChanges(ctx, state.repoDir)
+			hasUncommitted = gitcmd.HasUncommittedChanges(ctx, ws.Dir)
 		}()
 		wg.Wait()
 
@@ -211,6 +306,37 @@ func handleCommits(state *State) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(commits)
+	}
+}
+
+func handleListWorkspaces(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(state.Workspaces())
+	}
+}
+
+func handleAddWorkspace(state *State) http.HandlerFunc {
+	type request struct {
+		Dir string `json:"dir"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Dir == "" {
+			http.Error(w, `{"error":"dir is required"}`, http.StatusBadRequest)
+			return
+		}
+		if !gitcmd.IsGitRepo(req.Dir) {
+			http.Error(w, `{"error":"not a git repository"}`, http.StatusBadRequest)
+			return
+		}
+		ws, _ := state.AddWorkspace(req.Dir)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ws)
 	}
 }
 
