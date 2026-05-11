@@ -94,6 +94,7 @@ const PATH_SUBSTRINGS: string[] = [
   "/build/",
   "/__generated__/",
   "/generated/",
+  "/gen/",
   "/.terraform/",
 ];
 
