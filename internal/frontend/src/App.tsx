@@ -16,7 +16,7 @@ import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
 import { useComments } from "./hooks/useComments";
-import { copyToClipboard, formatAllThreadsPrompt } from "./utils/commentPrompt";
+import { copyToClipboard, formatAllThreadsPrompt, toCommitContext } from "./utils/commentPrompt";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -90,13 +90,16 @@ function AppContent() {
     setToastMessage("プロンプトをコピーしました");
   }, []);
 
-  const handleCopyAllPrompts = useCallback(async () => {
-    if (threads.length === 0) return;
-    const ok = await copyToClipboard(formatAllThreadsPrompt(threads));
-    if (ok) {
-      setToastMessage(`${threads.length}件のコメントをコピーしました`);
-    }
-  }, [threads]);
+  const handleCopyAllPrompts = useCallback(
+    async (ctx: ReturnType<typeof toCommitContext> | undefined) => {
+      if (threads.length === 0) return;
+      const ok = await copyToClipboard(formatAllThreadsPrompt(threads, ctx));
+      if (ok) {
+        setToastMessage(`${threads.length}件のコメントをコピーしました`);
+      }
+    },
+    [threads],
+  );
 
   useEffect(() => {
     const auto = new Set<string>();
@@ -322,6 +325,9 @@ function AppContent() {
   const selectedCommitInfo = selectedCommit
     ? commits.find((c) => c.hash === selectedCommit) ?? null
     : null;
+  const commitContext = selectedCommit
+    ? toCommitContext(selectedCommitInfo, selectedCommit)
+    : undefined;
 
   return (
     <div className="h-screen flex flex-col">
@@ -354,7 +360,7 @@ function AppContent() {
         <div className="ml-auto flex items-center gap-2 shrink-0">
           {threads.length > 0 && (
             <button
-              onClick={handleCopyAllPrompts}
+              onClick={() => handleCopyAllPrompts(commitContext)}
               title={`全コメント(${threads.length}件)をプロンプト形式でコピー`}
               className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors"
             >
@@ -458,6 +464,7 @@ function AppContent() {
                 collapsed={collapsedFiles.has(file.path)}
                 onToggleCollapsed={() => toggleFileCollapsed(file.path)}
                 threads={threads.filter((t) => t.filePath === file.path)}
+                commitContext={commitContext}
                 onAddComment={addThread}
                 onUpdateComment={updateMessage}
                 onRemoveComment={removeThread}

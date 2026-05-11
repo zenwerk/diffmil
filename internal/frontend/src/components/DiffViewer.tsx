@@ -15,6 +15,7 @@ import { CommentForm } from "./CommentForm";
 import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 import { STATUS_META } from "../constants/status";
 import { isAutoFoldPath } from "../constants/autoFold";
+import type { CommitContext } from "../utils/commentPrompt";
 
 interface DiffViewerProps {
   file: DiffFile;
@@ -23,6 +24,7 @@ interface DiffViewerProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   threads: CommentThread[];
+  commitContext?: CommitContext;
   onAddComment: (params: {
     filePath: string;
     side: DiffSide;
@@ -52,6 +54,7 @@ export function DiffViewer({
   collapsed,
   onToggleCollapsed,
   threads,
+  commitContext,
   onAddComment,
   onUpdateComment,
   onRemoveComment,
@@ -121,6 +124,7 @@ export function DiffViewer({
           <CommentCard
             key={t.id}
             thread={t}
+            commitContext={commitContext}
             onUpdateBody={(msgId, body) => onUpdateComment(t.id, msgId, body)}
             onRemove={() => onRemoveComment(t.id)}
             onCopied={onCommentCopied}

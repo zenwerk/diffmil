@@ -2,10 +2,15 @@ import { useState } from "react";
 import { Edit2, Trash2, Copy } from "lucide-react";
 import type { CommentThread } from "../types";
 import { CommentForm } from "./CommentForm";
-import { copyToClipboard, formatThreadPrompt } from "../utils/commentPrompt";
+import {
+  copyToClipboard,
+  formatThreadPrompt,
+  type CommitContext,
+} from "../utils/commentPrompt";
 
 interface CommentCardProps {
   thread: CommentThread;
+  commitContext?: CommitContext;
   onUpdateBody: (messageId: string, body: string) => void;
   onRemove: () => void;
   onCopied?: () => void;
@@ -13,6 +18,7 @@ interface CommentCardProps {
 
 export function CommentCard({
   thread,
+  commitContext,
   onUpdateBody,
   onRemove,
   onCopied,
@@ -22,7 +28,7 @@ export function CommentCard({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const handleCopy = async () => {
-    const ok = await copyToClipboard(formatThreadPrompt(thread));
+    const ok = await copyToClipboard(formatThreadPrompt(thread, commitContext));
     if (ok) onCopied?.();
   };
 
