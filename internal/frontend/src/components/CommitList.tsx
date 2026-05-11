@@ -1,9 +1,10 @@
-import { PanelLeftClose } from "lucide-react";
+import { PanelLeftClose, MessageSquare } from "lucide-react";
 import type { Commit } from "../types";
 
 interface CommitListProps {
   commits: Commit[];
   selectedHash: string | null;
+  commitsWithComments?: Set<string>;
   onSelect: (hash: string) => void;
   onCollapse: () => void;
 }
@@ -25,10 +26,12 @@ function formatDate(dateStr: string): string {
 function CommitEntry({
   commit,
   isSelected,
+  hasComments,
   onSelect,
 }: {
   commit: Commit;
   isSelected: boolean;
+  hasComments: boolean;
   onSelect: () => void;
 }) {
   const isWorking = commit.hash === "working";
@@ -79,8 +82,15 @@ function CommitEntry({
               </span>
             )}
           </div>
-          <div className="text-sm text-gh-text-primary truncate mt-0.5">
-            {commit.subject}
+          <div className="text-sm text-gh-text-primary truncate mt-0.5 flex items-center gap-1.5">
+            {hasComments && (
+              <MessageSquare
+                size={12}
+                className="shrink-0 text-blue-400"
+                aria-label="コメントあり"
+              />
+            )}
+            <span className="truncate">{commit.subject}</span>
           </div>
           <div className="text-xs text-gh-text-muted truncate">
             {commit.author}
@@ -94,6 +104,7 @@ function CommitEntry({
 export function CommitList({
   commits,
   selectedHash,
+  commitsWithComments,
   onSelect,
   onCollapse,
 }: CommitListProps) {
@@ -120,6 +131,7 @@ export function CommitList({
             key={commit.hash}
             commit={commit}
             isSelected={commit.hash === selectedHash}
+            hasComments={commitsWithComments?.has(commit.hash) ?? false}
             onSelect={() => onSelect(commit.hash)}
           />
         ))}

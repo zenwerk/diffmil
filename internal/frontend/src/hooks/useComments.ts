@@ -9,6 +9,29 @@ function storageKey(commitHash: string): string {
   return KEY_PREFIX + commitHash;
 }
 
+export function listCommitsWithComments(): Set<string> {
+  const out = new Set<string>();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(KEY_PREFIX)) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.some(isValidThread)) {
+          out.add(key.slice(KEY_PREFIX.length));
+        }
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
 function isValidThread(t: unknown): t is CommentThread {
   if (!t || typeof t !== "object") return false;
   const obj = t as Record<string, unknown>;

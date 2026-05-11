@@ -15,7 +15,7 @@ import { useTheme, ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
-import { useComments } from "./hooks/useComments";
+import { useComments, listCommitsWithComments } from "./hooks/useComments";
 import { copyToClipboard, formatAllThreadsPrompt, toCommitContext } from "./utils/commentPrompt";
 
 const EMPTY_THREADS: CommentThread[] = [];
@@ -87,6 +87,13 @@ function AppContent() {
   }, []);
 
   const { threads, addThread, updateMessage, removeThread } = useComments(selectedCommit);
+
+  const [commitsWithComments, setCommitsWithComments] = useState<Set<string>>(() =>
+    listCommitsWithComments(),
+  );
+  useEffect(() => {
+    setCommitsWithComments(listCommitsWithComments());
+  }, [threads, selectedCommit]);
 
   const threadsByFile = useMemo(() => {
     const map = new Map<string, CommentThread[]>();
@@ -426,6 +433,7 @@ function AppContent() {
                 <CommitList
                   commits={commits}
                   selectedHash={selectedCommit}
+                  commitsWithComments={commitsWithComments}
                   onSelect={handleSelectCommit}
                   onCollapse={toggleCommitsPanel}
                 />
