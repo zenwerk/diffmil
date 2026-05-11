@@ -3,6 +3,7 @@ import type { ThemedToken } from "shiki";
 import type { DiffLine, DiffSide } from "../types";
 import { TokenizedCode } from "./TokenizedCode";
 import { LINE_PREFIX, LINE_BG_HOVER } from "../constants/diff";
+import { pickSideAndLine } from "../utils/diffLine";
 
 interface DiffLineRowProps {
   line: DiffLine;
@@ -14,22 +15,6 @@ const LINE_BORDER: Record<string, string> = {
   add: "border-l-2 border-diff-addition-border",
   delete: "border-l-2 border-diff-deletion-border",
 };
-
-function pickSideAndLine(line: DiffLine): { side: DiffSide; lineNumber: number } | null {
-  if (line.type === "delete" && line.oldLineNumber != null) {
-    return { side: "old", lineNumber: line.oldLineNumber };
-  }
-  if (line.type === "add" && line.newLineNumber != null) {
-    return { side: "new", lineNumber: line.newLineNumber };
-  }
-  if (line.type === "normal" && line.newLineNumber != null) {
-    return { side: "new", lineNumber: line.newLineNumber };
-  }
-  if (line.oldLineNumber != null) {
-    return { side: "old", lineNumber: line.oldLineNumber };
-  }
-  return null;
-}
 
 export function DiffLineRow({ line, tokens, onAddComment }: DiffLineRowProps) {
   const target = pickSideAndLine(line);

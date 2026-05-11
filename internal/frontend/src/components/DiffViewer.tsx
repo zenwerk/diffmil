@@ -16,6 +16,7 @@ import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 import { STATUS_META } from "../constants/status";
 import { isAutoFoldPath } from "../constants/autoFold";
 import type { CommitContext } from "../utils/commentPrompt";
+import { pickSideAndLine } from "../utils/diffLine";
 
 interface DiffViewerProps {
   file: DiffFile;
@@ -150,26 +151,9 @@ export function DiffViewer({
   };
 
   const renderUnifiedExtra = (line: DiffLine): ReactNode => {
-    // Determine the line's default side (same logic as DiffLineRow.pickSideAndLine)
-    let side: DiffSide;
-    let lineNumber: number | undefined;
-    if (line.type === "delete" && line.oldLineNumber != null) {
-      side = "old";
-      lineNumber = line.oldLineNumber;
-    } else if (line.type === "add" && line.newLineNumber != null) {
-      side = "new";
-      lineNumber = line.newLineNumber;
-    } else if (line.type === "normal" && line.newLineNumber != null) {
-      side = "new";
-      lineNumber = line.newLineNumber;
-    } else if (line.oldLineNumber != null) {
-      side = "old";
-      lineNumber = line.oldLineNumber;
-    } else {
-      return null;
-    }
-    if (lineNumber == null) return null;
-    return renderExtra(side, lineNumber, line.content);
+    const target = pickSideAndLine(line);
+    if (!target) return null;
+    return renderExtra(target.side, target.lineNumber, line.content);
   };
 
   const renderSplitExtra = (line: DiffLine, side: DiffSide): ReactNode => {

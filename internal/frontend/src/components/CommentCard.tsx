@@ -24,8 +24,8 @@ export function CommentCard({
   onCopied,
 }: CommentCardProps) {
   const message = thread.messages[0];
-  const [editing, setEditing] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  type CardMode = "view" | "edit" | "confirmDelete";
+  const [mode, setMode] = useState<CardMode>("view");
 
   const handleCopy = async () => {
     const ok = await copyToClipboard(formatThreadPrompt(thread, commitContext));
@@ -45,15 +45,15 @@ export function CommentCard({
           {new Date(thread.createdAt).toLocaleString()}
         </span>
       </div>
-      {editing ? (
+      {mode === "edit" ? (
         <CommentForm
           initialBody={message.body}
-          submitLabel="Save"
+          submitLabel="保存"
           onSubmit={(body) => {
             onUpdateBody(message.id, body);
-            setEditing(false);
+            setMode("view");
           }}
-          onCancel={() => setEditing(false)}
+          onCancel={() => setMode("view")}
         />
       ) : (
         <>
@@ -69,13 +69,13 @@ export function CommentCard({
               <Copy size={14} />
             </button>
             <button
-              onClick={() => setEditing(true)}
+              onClick={() => setMode("edit")}
               title="編集"
               className="p-1 rounded text-gh-text-muted hover:text-gh-text-primary hover:bg-gh-bg-tertiary transition-colors"
             >
               <Edit2 size={14} />
             </button>
-            {confirmingDelete ? (
+            {mode === "confirmDelete" ? (
               <span className="ml-2 flex items-center gap-2 text-xs">
                 <span className="text-gh-warning">削除しますか？</span>
                 <button
@@ -85,7 +85,7 @@ export function CommentCard({
                   削除
                 </button>
                 <button
-                  onClick={() => setConfirmingDelete(false)}
+                  onClick={() => setMode("view")}
                   className="px-2 py-0.5 rounded text-gh-text-secondary hover:bg-gh-bg-tertiary transition-colors"
                 >
                   キャンセル
@@ -93,7 +93,7 @@ export function CommentCard({
               </span>
             ) : (
               <button
-                onClick={() => setConfirmingDelete(true)}
+                onClick={() => setMode("confirmDelete")}
                 title="削除"
                 className="p-1 rounded text-gh-text-muted hover:text-red-400 hover:bg-gh-bg-tertiary transition-colors"
               >

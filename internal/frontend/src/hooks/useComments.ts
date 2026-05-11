@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommentThread, DiffSide } from "../types";
 import { loadFromStorage, saveToStorage } from "../utils/storage";
+import { createId } from "../utils/id";
 
 const KEY_PREFIX = "diffmil.comments.";
 
@@ -8,11 +9,17 @@ function storageKey(commitHash: string): string {
   return KEY_PREFIX + commitHash;
 }
 
-function createId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+function isValidThread(t: unknown): t is CommentThread {
+  if (!t || typeof t !== "object") return false;
+  const obj = t as Record<string, unknown>;
+  return (
+    typeof obj.id === "string" &&
+    typeof obj.filePath === "string" &&
+    typeof obj.line === "number" &&
+    (obj.side === "old" || obj.side === "new") &&
+    Array.isArray(obj.messages) &&
+    obj.messages.length > 0
+  );
 }
 
 function loadThreads(commitHash: string): CommentThread[] {
@@ -21,7 +28,7 @@ function loadThreads(commitHash: string): CommentThread[] {
     (raw) => {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed as CommentThread[];
+        if (Array.isArray(parsed)) return parsed.filter(isValidThread);
       } catch {
         // ignore
       }
@@ -49,29 +56,33 @@ export interface UseCommentsResult {
 }
 
 export function useComments(commitHash: string | null): UseCommentsResult {
-  const [threads, setThreads] = useState<CommentThread[]>(() =>
-    commitHash ? loadThreads(commitHash) : [],
-  );
+  const [threads, setThreads] = useState<CommentThread[]>([]);
+
+  // Keep ref in sync so callbacks always see the current commit when scheduling
+  // a setState updater function (avoids race condition during commit switch).
+  const commitHashRef = useRef(commitHash);
+  useEffect(() => {
+    commitHashRef.current = commitHash;
+  }, [commitHash]);
 
   useEffect(() => {
     setThreads(commitHash ? loadThreads(commitHash) : []);
   }, [commitHash]);
 
-  const persist = useCallback(
-    (next: CommentThread[]) => {
-      if (commitHash) saveThreads(commitHash, next);
-      return next;
-    },
-    [commitHash],
-  );
+  const persist = (next: CommentThread[]): CommentThread[] => {
+    const hash = commitHashRef.current;
+    if (hash) saveThreads(hash, next);
+    return next;
+  };
 
   const addThread = useCallback<UseCommentsResult["addThread"]>(
     ({ filePath, side, line, body, codeSnapshot }) => {
-      if (!commitHash) return;
+      const hash = commitHashRef.current;
+      if (!hash) return;
       const now = new Date().toISOString();
       const thread: CommentThread = {
         id: createId(),
-        commitHash,
+        commitHash: hash,
         filePath,
         side,
         line,
@@ -82,15 +93,15 @@ export function useComments(commitHash: string | null): UseCommentsResult {
       };
       setThreads((prev) => persist([...prev, thread]));
     },
-    [commitHash, persist],
+    [],
   );
 
   const updateMessage = useCallback<UseCommentsResult["updateMessage"]>(
     (threadId, messageId, body) => {
       setThreads((prev) => {
+        const now = new Date().toISOString();
         const next = prev.map((t) => {
           if (t.id !== threadId) return t;
-          const now = new Date().toISOString();
           return {
             ...t,
             updatedAt: now,
@@ -102,14 +113,14 @@ export function useComments(commitHash: string | null): UseCommentsResult {
         return persist(next);
       });
     },
-    [persist],
+    [],
   );
 
   const removeThread = useCallback<UseCommentsResult["removeThread"]>(
     (threadId) => {
       setThreads((prev) => persist(prev.filter((t) => t.id !== threadId)));
     },
-    [persist],
+    [],
   );
 
   return { threads, addThread, updateMessage, removeThread };

@@ -39,6 +39,7 @@ export function formatThreadPrompt(thread: CommentThread, commit?: CommitContext
   lines.push("```");
   lines.push(thread.codeSnapshot);
   lines.push("```");
+  lines.push("");
   for (const msg of thread.messages) {
     lines.push(msg.body);
   }

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { PanelLeft, PanelRight, FoldVertical, UnfoldVertical, ClipboardCopy } from "lucide-react";
-import type { DiffResponse, Commit, DiffViewMode } from "./types";
+import type { CommentThread, DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
 import { DiffViewer } from "./components/DiffViewer";
@@ -17,6 +17,8 @@ import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
 import { useComments } from "./hooks/useComments";
 import { copyToClipboard, formatAllThreadsPrompt, toCommitContext } from "./utils/commentPrompt";
+
+const EMPTY_THREADS: CommentThread[] = [];
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -85,6 +87,16 @@ function AppContent() {
   }, []);
 
   const { threads, addThread, updateMessage, removeThread } = useComments(selectedCommit);
+
+  const threadsByFile = useMemo(() => {
+    const map = new Map<string, CommentThread[]>();
+    for (const t of threads) {
+      const arr = map.get(t.filePath) ?? [];
+      arr.push(t);
+      map.set(t.filePath, arr);
+    }
+    return map;
+  }, [threads]);
 
   const handleCommentCopied = useCallback(() => {
     setToastMessage("プロンプトをコピーしました");
@@ -463,7 +475,7 @@ function AppContent() {
                 viewMode={viewMode}
                 collapsed={collapsedFiles.has(file.path)}
                 onToggleCollapsed={() => toggleFileCollapsed(file.path)}
-                threads={threads.filter((t) => t.filePath === file.path)}
+                threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
                 commitContext={commitContext}
                 onAddComment={addThread}
                 onUpdateComment={updateMessage}

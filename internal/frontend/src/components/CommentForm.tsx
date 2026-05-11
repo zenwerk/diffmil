@@ -10,20 +10,20 @@ interface CommentFormProps {
 
 export function CommentForm({
   initialBody = "",
-  submitLabel = "Comment",
+  submitLabel = "コメント",
   placeholder = "コメントを入力 (Ctrl+Enter で送信)",
   onSubmit,
   onCancel,
 }: CommentFormProps) {
   const [body, setBody] = useState(initialBody);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const trimmed = body.trim();
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
   const submit = () => {
-    const trimmed = body.trim();
     if (!trimmed) return;
     onSubmit(trimmed);
   };
@@ -52,11 +52,11 @@ export function CommentForm({
           onClick={onCancel}
           className="px-3 py-1 text-xs rounded text-gh-text-secondary hover:bg-gh-bg-tertiary transition-colors"
         >
-          Cancel
+          キャンセル
         </button>
         <button
           onClick={submit}
-          disabled={!body.trim()}
+          disabled={!trimmed}
           className="px-3 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {submitLabel}
