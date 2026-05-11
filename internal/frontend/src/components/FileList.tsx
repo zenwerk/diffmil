@@ -53,12 +53,12 @@ export function FileList({ files, onCollapse }: FileListProps) {
               className="w-full text-left px-3 py-1.5 hover:bg-gh-bg-tertiary flex items-center gap-2 group"
             >
               <span
-                className={`text-xs font-bold shrink-0 w-4 text-center ${autoFold ? "text-gh-text-muted/60" : meta.colorClass}`}
+                className={`text-sm font-bold shrink-0 w-4 text-center ${autoFold ? "text-gh-text-muted/60" : meta.colorClass}`}
               >
                 {meta.label}
               </span>
               <span
-                className={`font-mono text-xs truncate ${autoFold ? "text-gh-text-muted/70 italic group-hover:text-gh-text-muted" : "text-gh-text-secondary group-hover:text-gh-text-primary"}`}
+                className={`font-mono text-sm truncate ${autoFold ? "text-gh-text-muted/70 italic group-hover:text-gh-text-muted" : "text-gh-text-secondary group-hover:text-gh-text-primary"}`}
               >
                 {file.path}
               </span>
