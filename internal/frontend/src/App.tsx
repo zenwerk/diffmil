@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { PanelLeft, PanelRight, FoldVertical, UnfoldVertical } from "lucide-react";
+import { PanelLeft, PanelRight, FoldVertical, UnfoldVertical, ClipboardCopy } from "lucide-react";
 import type { DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -15,6 +15,8 @@ import { useTheme, ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
+import { useComments } from "./hooks/useComments";
+import { copyToClipboard, formatAllThreadsPrompt } from "./utils/commentPrompt";
 
 const VIEW_MODE_KEY = "diffmil.viewMode";
 const COMMITS_PANEL_KEY = "diffmil.commitsPanelOpen";
@@ -81,6 +83,20 @@ function AppContent() {
   const expandAllFiles = useCallback(() => {
     setCollapsedFiles(new Set());
   }, []);
+
+  const { threads, addThread, updateMessage, removeThread } = useComments(selectedCommit);
+
+  const handleCommentCopied = useCallback(() => {
+    setToastMessage("プロンプトをコピーしました");
+  }, []);
+
+  const handleCopyAllPrompts = useCallback(async () => {
+    if (threads.length === 0) return;
+    const ok = await copyToClipboard(formatAllThreadsPrompt(threads));
+    if (ok) {
+      setToastMessage(`${threads.length}件のコメントをコピーしました`);
+    }
+  }, [threads]);
 
   useEffect(() => {
     const auto = new Set<string>();
@@ -336,6 +352,16 @@ function AppContent() {
           </div>
         )}
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          {threads.length > 0 && (
+            <button
+              onClick={handleCopyAllPrompts}
+              title={`全コメント(${threads.length}件)をプロンプト形式でコピー`}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors"
+            >
+              <ClipboardCopy size={14} />
+              <span className="font-mono">{threads.length}</span>
+            </button>
+          )}
           {files.length > 0 && (
             <>
               <button
@@ -431,6 +457,11 @@ function AppContent() {
                 viewMode={viewMode}
                 collapsed={collapsedFiles.has(file.path)}
                 onToggleCollapsed={() => toggleFileCollapsed(file.path)}
+                threads={threads.filter((t) => t.filePath === file.path)}
+                onAddComment={addThread}
+                onUpdateComment={updateMessage}
+                onRemoveComment={removeThread}
+                onCommentCopied={handleCommentCopied}
               />
             ))
           )}

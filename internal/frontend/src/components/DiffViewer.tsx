@@ -1,9 +1,17 @@
-import { useMemo } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ThemedToken } from "shiki";
-import type { DiffFile, DiffViewMode } from "../types";
+import type {
+  CommentThread,
+  DiffFile,
+  DiffLine,
+  DiffSide,
+  DiffViewMode,
+} from "../types";
 import { DiffChunk } from "./DiffChunk";
 import { SplitDiffChunk } from "./SplitDiffChunk";
+import { CommentCard } from "./CommentCard";
+import { CommentForm } from "./CommentForm";
 import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 import { STATUS_META } from "../constants/status";
 import { isAutoFoldPath } from "../constants/autoFold";
@@ -14,6 +22,27 @@ interface DiffViewerProps {
   viewMode: DiffViewMode;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  threads: CommentThread[];
+  onAddComment: (params: {
+    filePath: string;
+    side: DiffSide;
+    line: number;
+    body: string;
+    codeSnapshot: string;
+  }) => void;
+  onUpdateComment: (threadId: string, messageId: string, body: string) => void;
+  onRemoveComment: (threadId: string) => void;
+  onCommentCopied?: () => void;
+}
+
+interface PendingForm {
+  side: DiffSide;
+  line: number;
+  content: string;
+}
+
+function lineKey(side: DiffSide, line: number): string {
+  return `${side}:${line}`;
 }
 
 export function DiffViewer({
@@ -22,10 +51,27 @@ export function DiffViewer({
   viewMode,
   collapsed,
   onToggleCollapsed,
+  threads,
+  onAddComment,
+  onUpdateComment,
+  onRemoveComment,
+  onCommentCopied,
 }: DiffViewerProps) {
   const meta = STATUS_META[file.status] ?? STATUS_META.modified;
   const autoFold = isAutoFoldPath(file.path);
   const { ready, highlightLines } = useHighlighter();
+  const [pending, setPending] = useState<PendingForm | null>(null);
+
+  const threadsByLine = useMemo(() => {
+    const map = new Map<string, CommentThread[]>();
+    for (const t of threads) {
+      const key = lineKey(t.side, t.line);
+      const arr = map.get(key) ?? [];
+      arr.push(t);
+      map.set(key, arr);
+    }
+    return map;
+  }, [threads]);
 
   const allLineTokens = useMemo(() => {
     if (collapsed) return null;
@@ -43,7 +89,6 @@ export function DiffViewer({
     const tokens = highlightLines(allLines, lang, shikiTheme);
     if (tokens.length === 0) return null;
 
-    // Distribute tokens back to chunks
     const result: (ThemedToken[] | undefined)[][] = [];
     let idx = 0;
     for (const chunk of file.chunks) {
@@ -57,7 +102,77 @@ export function DiffViewer({
     return result;
   }, [ready, file, shikiTheme, highlightLines, collapsed]);
 
-  const ChunkComponent = viewMode === "split" ? SplitDiffChunk : DiffChunk;
+  const handleAddComment = (side: DiffSide, line: number, content: string) => {
+    setPending({ side, line, content });
+  };
+
+  const renderExtra = (
+    targetSide: DiffSide,
+    targetLine: number,
+    content: string,
+  ): ReactNode => {
+    const key = lineKey(targetSide, targetLine);
+    const lineThreads = threadsByLine.get(key) ?? [];
+    const showForm = pending?.side === targetSide && pending.line === targetLine;
+    if (lineThreads.length === 0 && !showForm) return null;
+    return (
+      <div className="flex flex-col gap-2">
+        {lineThreads.map((t) => (
+          <CommentCard
+            key={t.id}
+            thread={t}
+            onUpdateBody={(msgId, body) => onUpdateComment(t.id, msgId, body)}
+            onRemove={() => onRemoveComment(t.id)}
+            onCopied={onCommentCopied}
+          />
+        ))}
+        {showForm && (
+          <CommentForm
+            onSubmit={(body) => {
+              onAddComment({
+                filePath: file.path,
+                side: targetSide,
+                line: targetLine,
+                body,
+                codeSnapshot: content,
+              });
+              setPending(null);
+            }}
+            onCancel={() => setPending(null)}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const renderUnifiedExtra = (line: DiffLine): ReactNode => {
+    // Determine the line's default side (same logic as DiffLineRow.pickSideAndLine)
+    let side: DiffSide;
+    let lineNumber: number | undefined;
+    if (line.type === "delete" && line.oldLineNumber != null) {
+      side = "old";
+      lineNumber = line.oldLineNumber;
+    } else if (line.type === "add" && line.newLineNumber != null) {
+      side = "new";
+      lineNumber = line.newLineNumber;
+    } else if (line.type === "normal" && line.newLineNumber != null) {
+      side = "new";
+      lineNumber = line.newLineNumber;
+    } else if (line.oldLineNumber != null) {
+      side = "old";
+      lineNumber = line.oldLineNumber;
+    } else {
+      return null;
+    }
+    if (lineNumber == null) return null;
+    return renderExtra(side, lineNumber, line.content);
+  };
+
+  const renderSplitExtra = (line: DiffLine, side: DiffSide): ReactNode => {
+    const lineNumber = side === "old" ? line.oldLineNumber : line.newLineNumber;
+    if (lineNumber == null) return null;
+    return renderExtra(side, lineNumber, line.content);
+  };
 
   return (
     <div
@@ -92,6 +207,11 @@ export function DiffViewer({
             file.path
           )}
         </span>
+        {threads.length > 0 && (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/30 shrink-0">
+            💬 {threads.length}
+          </span>
+        )}
         <span className="ml-auto flex gap-2 text-xs shrink-0">
           {file.additions > 0 && (
             <span className="text-green-400">+{file.additions}</span>
@@ -125,13 +245,25 @@ export function DiffViewer({
               </colgroup>
             )}
             <tbody>
-              {file.chunks.map((chunk, i) => (
-                <ChunkComponent
-                  key={i}
-                  chunk={chunk}
-                  lineTokens={allLineTokens?.[i]}
-                />
-              ))}
+              {file.chunks.map((chunk, i) =>
+                viewMode === "split" ? (
+                  <SplitDiffChunk
+                    key={i}
+                    chunk={chunk}
+                    lineTokens={allLineTokens?.[i]}
+                    onAddComment={handleAddComment}
+                    renderLineExtra={renderSplitExtra}
+                  />
+                ) : (
+                  <DiffChunk
+                    key={i}
+                    chunk={chunk}
+                    lineTokens={allLineTokens?.[i]}
+                    onAddComment={handleAddComment}
+                    renderLineExtra={renderUnifiedExtra}
+                  />
+                ),
+              )}
             </tbody>
           </table>
         </div>
