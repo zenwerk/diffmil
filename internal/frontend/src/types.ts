@@ -38,3 +38,24 @@ export interface Commit {
   date: string;
   tags?: string[];
 }
+
+export type DiffSide = "old" | "new";
+
+export interface CommentMessage {
+  id: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommentThread {
+  id: string;
+  commitHash: string;
+  filePath: string;
+  side: DiffSide;
+  line: number;
+  codeSnapshot: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: CommentMessage[];
+}
