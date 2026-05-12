@@ -158,13 +158,16 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 
 	// Restore previously tracked workspaces (if any).
 	for _, entry := range backup.Load(port).Workspaces {
-		if entry.Dir == "" || entry.Dir == cfg.RepoDir {
+		if entry.Dir == "" {
 			continue
 		}
 		if !gitcmd.IsGitRepo(entry.Dir) {
 			continue
 		}
-		state.AddWorkspace(entry.Dir)
+		ws, _ := state.AddWorkspace(entry.Dir)
+		if ws != nil && entry.Label != "" && entry.Label != ws.Label {
+			state.UpdateWorkspaceLabel(ws.ID, entry.Label)
+		}
 	}
 
 	url := fmt.Sprintf("http://localhost:%d", port)
@@ -206,6 +209,15 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 	state.WorkspaceAdded = func(ws *server.Workspace) {
 		startWatcher(ws.Dir, ws.ID)
 	}
+	state.WorkspaceRemoved = func(id string) {
+		watchersMu.Lock()
+		gw, ok := watchers[id]
+		delete(watchers, id)
+		watchersMu.Unlock()
+		if ok {
+			gw.Close()
+		}
+	}
 
 	for _, ws := range state.Workspaces() {
 		startWatcher(ws.Dir, ws.ID)
@@ -220,7 +232,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 			snap := state.Workspaces()
 			entries := make([]backup.WorkspaceEntry, 0, len(snap))
 			for _, ws := range snap {
-				entries = append(entries, backup.WorkspaceEntry{Dir: ws.Dir})
+				entries = append(entries, backup.WorkspaceEntry{Dir: ws.Dir, Label: ws.Label})
 			}
 			if err := backup.Save(port, backup.State{Workspaces: entries}); err != nil {
 				log.Printf("warning: failed to save workspaces backup: %v", err)

@@ -18,7 +18,8 @@ type State struct {
 
 // WorkspaceEntry is the on-disk representation of a tracked workspace.
 type WorkspaceEntry struct {
-	Dir string `json:"dir"`
+	Dir   string `json:"dir"`
+	Label string `json:"label,omitempty"`
 }
 
 // Path returns the absolute path to the backup file for the given port.

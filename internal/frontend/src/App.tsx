@@ -57,7 +57,14 @@ const loadBoolPanel = (key: string) =>
   );
 
 function AppContent() {
-  const { workspaces, activeId, setActiveId, refresh: refreshWorkspaces } = useWorkspaces();
+  const {
+    workspaces,
+    activeId,
+    setActiveId,
+    refresh: refreshWorkspaces,
+    removeWorkspace,
+    renameWorkspace,
+  } = useWorkspaces();
   const wsId = activeId;
   const wsParam = wsId ? `?ws=${encodeURIComponent(wsId)}` : "";
 
@@ -392,6 +399,12 @@ function AppContent() {
           workspaces={workspaces}
           activeId={activeId}
           onSelect={setActiveId}
+          onRemove={(id) => {
+            void removeWorkspace(id);
+          }}
+          onRename={(id, label) => {
+            void renameWorkspace(id, label);
+          }}
         />
         {selectedCommitInfo && (
           <div className="flex items-center gap-2 min-w-0 group relative">

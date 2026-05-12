@@ -12,6 +12,20 @@ function loadActive(): string | null {
   );
 }
 
+function getUrlWs(): string | null {
+  return new URLSearchParams(window.location.search).get("ws");
+}
+
+function setUrlWs(id: string | null) {
+  const url = new URL(window.location.href);
+  if (id) {
+    url.searchParams.set("ws", id);
+  } else {
+    url.searchParams.delete("ws");
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
 async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
     const res = await fetch("/_/api/workspaces");
@@ -25,10 +39,9 @@ async function fetchWorkspaces(): Promise<Workspace[]> {
 
 export function useWorkspaces() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [activeId, setActiveIdState] = useState<string | null>(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("ws");
-    return fromUrl || loadActive();
-  });
+  const [activeId, setActiveIdState] = useState<string | null>(
+    () => getUrlWs() || loadActive(),
+  );
 
   const refresh = useCallback(async () => {
     const list = await fetchWorkspaces();
@@ -40,7 +53,7 @@ export function useWorkspaces() {
     refresh();
   }, [refresh]);
 
-  // Make sure activeId is valid (falls back to first workspace if missing).
+  // Fall back to the first workspace when the persisted ID is no longer valid.
   useEffect(() => {
     if (workspaces.length === 0) return;
     if (!activeId || !workspaces.some((w) => w.id === activeId)) {
@@ -48,12 +61,78 @@ export function useWorkspaces() {
     }
   }, [workspaces, activeId]);
 
+  // Keep URL and localStorage in sync with the active workspace.
+  useEffect(() => {
+    if (!activeId) return;
+    saveToStorage(ACTIVE_WS_KEY, activeId);
+    setUrlWs(activeId);
+  }, [activeId]);
+
+  // Respond to back/forward navigation that changes ?ws=...
+  useEffect(() => {
+    const onPop = () => {
+      const fromUrl = getUrlWs();
+      if (fromUrl) setActiveIdState(fromUrl);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const setActiveId = useCallback((id: string) => {
     setActiveIdState(id);
-    saveToStorage(ACTIVE_WS_KEY, id);
   }, []);
+
+  const addWorkspace = useCallback(
+    async (dir: string): Promise<Workspace | null> => {
+      const res = await fetch("/_/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dir }),
+      });
+      if (!res.ok) return null;
+      const ws = (await res.json()) as Workspace;
+      await refresh();
+      return ws;
+    },
+    [refresh],
+  );
+
+  const removeWorkspace = useCallback(
+    async (id: string): Promise<boolean> => {
+      const res = await fetch(`/_/api/workspaces/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) return false;
+      await refresh();
+      return true;
+    },
+    [refresh],
+  );
+
+  const renameWorkspace = useCallback(
+    async (id: string, label: string): Promise<boolean> => {
+      const res = await fetch(`/_/api/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      });
+      if (!res.ok) return false;
+      await refresh();
+      return true;
+    },
+    [refresh],
+  );
 
   const active = workspaces.find((w) => w.id === activeId) ?? null;
 
-  return { workspaces, active, activeId: active?.id ?? null, setActiveId, refresh };
+  return {
+    workspaces,
+    active,
+    activeId: active?.id ?? null,
+    setActiveId,
+    addWorkspace,
+    removeWorkspace,
+    renameWorkspace,
+    refresh,
+  };
 }

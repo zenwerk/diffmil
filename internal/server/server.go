@@ -41,6 +41,10 @@ type State struct {
 	// Callers can use it to start per-workspace background work (e.g. a git watcher).
 	WorkspaceAdded func(ws *Workspace)
 
+	// WorkspaceRemoved is invoked synchronously when a workspace is unregistered.
+	// Callers can use it to stop per-workspace background work.
+	WorkspaceRemoved func(id string)
+
 	// dirty is signalled (non-blocking) whenever the workspace list mutates.
 	// Callers can subscribe via DirtyCh() to persist the latest snapshot.
 	dirty chan struct{}
@@ -138,6 +142,54 @@ func (s *State) AddWorkspace(dir string) (*Workspace, bool) {
 	return &ws, true
 }
 
+// RemoveWorkspace removes the workspace with the given ID. Returns false when
+// no workspace with that ID exists.
+func (s *State) RemoveWorkspace(id string) bool {
+	s.mu.Lock()
+	idx := -1
+	for i, w := range s.workspaces {
+		if w.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		s.mu.Unlock()
+		return false
+	}
+	s.workspaces = append(s.workspaces[:idx], s.workspaces[idx+1:]...)
+	delete(s.diffs, id)
+	s.mu.Unlock()
+	if s.WorkspaceRemoved != nil {
+		s.WorkspaceRemoved(id)
+	}
+	s.notify(sseEvent{Name: "workspaces-changed", Data: "{}"})
+	s.markDirty()
+	return true
+}
+
+// UpdateWorkspaceLabel changes the user-facing label of a workspace.
+// Returns the updated workspace or nil when the ID is unknown.
+func (s *State) UpdateWorkspaceLabel(id, label string) *Workspace {
+	s.mu.Lock()
+	var updated *Workspace
+	for _, w := range s.workspaces {
+		if w.ID == id {
+			w.Label = label
+			copy := *w
+			updated = &copy
+			break
+		}
+	}
+	s.mu.Unlock()
+	if updated == nil {
+		return nil
+	}
+	s.notify(sseEvent{Name: "workspaces-changed", Data: "{}"})
+	s.markDirty()
+	return updated
+}
+
 // markDirty sends a non-blocking signal on the dirty channel.
 func (s *State) markDirty() {
 	select {
@@ -214,6 +266,8 @@ func New(cfg Config) (http.Handler, *State) {
 	mux.HandleFunc("GET /_/api/commits", handleCommits(state))
 	mux.HandleFunc("GET /_/api/workspaces", handleListWorkspaces(state))
 	mux.HandleFunc("POST /_/api/workspaces", handleAddWorkspace(state))
+	mux.HandleFunc("DELETE /_/api/workspaces/{id}", handleRemoveWorkspace(state))
+	mux.HandleFunc("PATCH /_/api/workspaces/{id}", handlePatchWorkspace(state))
 	mux.HandleFunc("GET /_/api/status", handleStatus())
 	mux.HandleFunc("POST /_/api/shutdown", handleShutdown(state))
 	mux.HandleFunc("POST /_/api/restart", handleRestart(state))
@@ -369,6 +423,55 @@ func handleAddWorkspace(state *State) http.HandlerFunc {
 			return
 		}
 		ws, _ := state.AddWorkspace(req.Dir)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ws)
+	}
+}
+
+func handleRemoveWorkspace(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
+			return
+		}
+		if len(state.Workspaces()) <= 1 {
+			http.Error(w, `{"error":"cannot remove the last workspace"}`, http.StatusBadRequest)
+			return
+		}
+		if !state.RemoveWorkspace(id) {
+			http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	}
+}
+
+func handlePatchWorkspace(state *State) http.HandlerFunc {
+	type request struct {
+		Label string `json:"label"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
+			return
+		}
+		var req request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.Label) == "" {
+			http.Error(w, `{"error":"label is required"}`, http.StatusBadRequest)
+			return
+		}
+		ws := state.UpdateWorkspaceLabel(id, req.Label)
+		if ws == nil {
+			http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ws)
 	}
