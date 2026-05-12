@@ -111,29 +111,22 @@ func (s *State) findWorkspace(id string) *Workspace {
 	return nil
 }
 
-// findWorkspaceByDir locates a workspace by its absolute directory path.
-func (s *State) findWorkspaceByDir(dir string) *Workspace {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, w := range s.workspaces {
-		if w.Dir == dir {
-			return w
-		}
-	}
-	return nil
-}
-
 // AddWorkspace registers a workspace for the given absolute directory.
 // If a workspace for that directory already exists it is returned without modification.
 // The bool return value is true when a new workspace was added.
 func (s *State) AddWorkspace(dir string) (*Workspace, bool) {
-	if existing := s.findWorkspaceByDir(dir); existing != nil {
-		return existing, false
+	s.mu.Lock()
+	for _, w := range s.workspaces {
+		if w.Dir == dir {
+			existing := *w
+			s.mu.Unlock()
+			return &existing, false
+		}
 	}
 	ws := newWorkspace(dir)
-	s.mu.Lock()
 	s.workspaces = append(s.workspaces, &ws)
 	s.mu.Unlock()
+
 	if s.WorkspaceAdded != nil {
 		s.WorkspaceAdded(&ws)
 	}
@@ -142,9 +135,22 @@ func (s *State) AddWorkspace(dir string) (*Workspace, bool) {
 	return &ws, true
 }
 
-// RemoveWorkspace removes the workspace with the given ID. Returns false when
-// no workspace with that ID exists.
-func (s *State) RemoveWorkspace(id string) bool {
+// RemoveResult describes the outcome of a RemoveWorkspace call.
+type RemoveResult int
+
+const (
+	// RemoveOK indicates the workspace was removed.
+	RemoveOK RemoveResult = iota
+	// RemoveNotFound indicates no workspace with that ID exists.
+	RemoveNotFound
+	// RemoveLastWorkspace indicates the workspace is the only one and was not removed.
+	RemoveLastWorkspace
+)
+
+// RemoveWorkspace removes the workspace with the given ID. The last workspace
+// cannot be removed; the check is performed under the same lock as the mutation
+// to avoid a TOCTOU race with concurrent deletes.
+func (s *State) RemoveWorkspace(id string) RemoveResult {
 	s.mu.Lock()
 	idx := -1
 	for i, w := range s.workspaces {
@@ -155,17 +161,22 @@ func (s *State) RemoveWorkspace(id string) bool {
 	}
 	if idx == -1 {
 		s.mu.Unlock()
-		return false
+		return RemoveNotFound
+	}
+	if len(s.workspaces) <= 1 {
+		s.mu.Unlock()
+		return RemoveLastWorkspace
 	}
 	s.workspaces = append(s.workspaces[:idx], s.workspaces[idx+1:]...)
 	delete(s.diffs, id)
 	s.mu.Unlock()
+
 	if s.WorkspaceRemoved != nil {
 		s.WorkspaceRemoved(id)
 	}
 	s.notify(sseEvent{Name: "workspaces-changed", Data: "{}"})
 	s.markDirty()
-	return true
+	return RemoveOK
 }
 
 // UpdateWorkspaceLabel changes the user-facing label of a workspace.
@@ -217,8 +228,11 @@ func workspaceEvent(name, wsID string) sseEvent {
 	if wsID == "" {
 		return sseEvent{Name: name, Data: "{}"}
 	}
-	// Hand-rolled JSON to avoid the overhead of json.Marshal for a single field.
-	return sseEvent{Name: name, Data: `{"workspaceId":"` + wsID + `"}`}
+	data, err := json.Marshal(map[string]string{"workspaceId": wsID})
+	if err != nil {
+		return sseEvent{Name: name, Data: "{}"}
+	}
+	return sseEvent{Name: name, Data: string(data)}
 }
 
 func (s *State) getDiff(wsID string) *diff.DiffResponse {
@@ -435,16 +449,15 @@ func handleRemoveWorkspace(state *State) http.HandlerFunc {
 			http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
 			return
 		}
-		if len(state.Workspaces()) <= 1 {
+		switch state.RemoveWorkspace(id) {
+		case RemoveOK:
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true}`))
+		case RemoveLastWorkspace:
 			http.Error(w, `{"error":"cannot remove the last workspace"}`, http.StatusBadRequest)
-			return
-		}
-		if !state.RemoveWorkspace(id) {
+		case RemoveNotFound:
 			http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
-			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true}`))
 	}
 }
 

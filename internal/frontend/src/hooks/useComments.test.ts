@@ -1,6 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useComments, listCommitsWithComments } from "./useComments";
+import type { CommentThread } from "../types";
+
+function makeThread(overrides: Partial<CommentThread> = {}): CommentThread {
+  return {
+    id: "x",
+    filePath: "a",
+    line: 1,
+    side: "new",
+    codeSnapshot: "",
+    commitHash: "h",
+    createdAt: "",
+    updatedAt: "",
+    messages: [{ id: "m", body: "b", createdAt: "", updatedAt: "" }],
+    ...overrides,
+  };
+}
 
 const addOne = (
   result: { current: ReturnType<typeof useComments> },
@@ -64,7 +80,7 @@ describe("useComments", () => {
   it("rejects invalid threads from localStorage", () => {
     localStorage.setItem(
       "diffmil.comments.ws1.h",
-      JSON.stringify([{ id: "ok", filePath: "a", line: 1, side: "new", messages: [{ id: "m", body: "b", createdAt: "", updatedAt: "" }], codeSnapshot: "", commitHash: "h", createdAt: "", updatedAt: "" }, { broken: true }]),
+      JSON.stringify([makeThread({ id: "ok" }), { broken: true }]),
     );
     const { result } = renderHook(() => useComments("ws1", "h"));
     expect(result.current.threads).toHaveLength(1);
@@ -90,15 +106,12 @@ describe("listCommitsWithComments", () => {
   it("scans workspace-scoped keys", () => {
     localStorage.setItem(
       "diffmil.comments.ws1.commit-a",
-      JSON.stringify([{ id: "x", filePath: "a", line: 1, side: "new", messages: [{ id: "m", body: "b", createdAt: "", updatedAt: "" }], codeSnapshot: "", commitHash: "commit-a", createdAt: "", updatedAt: "" }]),
+      JSON.stringify([makeThread({ commitHash: "commit-a" })]),
     );
-    localStorage.setItem(
-      "diffmil.comments.ws1.commit-b",
-      JSON.stringify([]),
-    );
+    localStorage.setItem("diffmil.comments.ws1.commit-b", JSON.stringify([]));
     localStorage.setItem(
       "diffmil.comments.ws2.commit-c",
-      JSON.stringify([{ id: "x", filePath: "a", line: 1, side: "new", messages: [{ id: "m", body: "b", createdAt: "", updatedAt: "" }], codeSnapshot: "", commitHash: "commit-c", createdAt: "", updatedAt: "" }]),
+      JSON.stringify([makeThread({ commitHash: "commit-c" })]),
     );
     expect([...listCommitsWithComments("ws1")]).toEqual(["commit-a"]);
     expect([...listCommitsWithComments("ws2")]).toEqual(["commit-c"]);
@@ -107,12 +120,12 @@ describe("listCommitsWithComments", () => {
   it("falls back to legacy flat key when wsId is null", () => {
     localStorage.setItem(
       "diffmil.comments.legacy-hash",
-      JSON.stringify([{ id: "x", filePath: "a", line: 1, side: "new", messages: [{ id: "m", body: "b", createdAt: "", updatedAt: "" }], codeSnapshot: "", commitHash: "legacy-hash", createdAt: "", updatedAt: "" }]),
+      JSON.stringify([makeThread({ commitHash: "legacy-hash" })]),
     );
     // ws-prefixed entry should not leak into legacy results.
     localStorage.setItem(
       "diffmil.comments.ws1.commit-a",
-      JSON.stringify([{ id: "x", filePath: "a", line: 1, side: "new", messages: [{ id: "m", body: "b", createdAt: "", updatedAt: "" }], codeSnapshot: "", commitHash: "commit-a", createdAt: "", updatedAt: "" }]),
+      JSON.stringify([makeThread({ commitHash: "commit-a" })]),
     );
     expect([...listCommitsWithComments(null)]).toEqual(["legacy-hash"]);
   });

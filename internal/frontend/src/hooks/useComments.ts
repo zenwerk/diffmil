@@ -114,11 +114,11 @@ export function useComments(
     setThreads(commitHash ? loadThreads(wsId, commitHash) : []);
   }, [wsId, commitHash]);
 
-  const persist = (next: CommentThread[]): CommentThread[] => {
+  const persist = useCallback((next: CommentThread[]): CommentThread[] => {
     const hash = commitHashRef.current;
     if (hash) saveThreads(wsIdRef.current, hash, next);
     return next;
-  };
+  }, []);
 
   const addThread = useCallback<UseCommentsResult["addThread"]>(
     ({ filePath, side, line, body, codeSnapshot }) => {
@@ -138,7 +138,7 @@ export function useComments(
       };
       setThreads((prev) => persist([...prev, thread]));
     },
-    [],
+    [persist],
   );
 
   const updateMessage = useCallback<UseCommentsResult["updateMessage"]>(
@@ -158,14 +158,14 @@ export function useComments(
         return persist(next);
       });
     },
-    [],
+    [persist],
   );
 
   const removeThread = useCallback<UseCommentsResult["removeThread"]>(
     (threadId) => {
       setThreads((prev) => persist(prev.filter((t) => t.id !== threadId)));
     },
-    [],
+    [persist],
   );
 
   return { threads, addThread, updateMessage, removeThread };

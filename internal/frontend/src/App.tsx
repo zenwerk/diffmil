@@ -294,6 +294,17 @@ function AppContent() {
       });
   }, [fetchCommits, wsParam, wsId, workspaces.length]);
 
+  // Refs so the long-lived SSE listener always sees the current active workspace
+  // without forcing the EventSource to reconnect on every workspace switch.
+  const wsIdSseRef = useRef(wsId);
+  const wsParamSseRef = useRef(wsParam);
+  const fetchCommitsRef = useRef(fetchCommits);
+  useEffect(() => {
+    wsIdSseRef.current = wsId;
+    wsParamSseRef.current = wsParam;
+    fetchCommitsRef.current = fetchCommits;
+  }, [wsId, wsParam, fetchCommits]);
+
   useEffect(() => {
     const es = new EventSource("/_/events");
 
@@ -303,7 +314,7 @@ function AppContent() {
         const parsed = JSON.parse(data || "{}");
         const eventWs = parsed.workspaceId;
         if (!eventWs) return true;
-        return eventWs === wsId;
+        return eventWs === wsIdSseRef.current;
       } catch {
         return true;
       }
@@ -311,7 +322,7 @@ function AppContent() {
 
     es.addEventListener("update", (e) => {
       if (!isRelevant((e as MessageEvent).data)) return;
-      fetch("/_/api/diff" + wsParam)
+      fetch("/_/api/diff" + wsParamSseRef.current)
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           return res.json() as Promise<DiffResponse>;
@@ -325,7 +336,7 @@ function AppContent() {
 
     es.addEventListener("commits-changed", (e) => {
       if (!isRelevant((e as MessageEvent).data)) return;
-      fetchCommits().then((commitList) => {
+      fetchCommitsRef.current().then((commitList) => {
         setCommits(commitList);
         setToastMessage("New commits detected");
       });
@@ -338,7 +349,7 @@ function AppContent() {
     es.onerror = () => {};
 
     return () => es.close();
-  }, [wsParam, wsId, fetchCommits, refreshWorkspaces]);
+  }, [refreshWorkspaces]);
 
   const handleSelectCommit = useCallback(
     (hash: string) => {

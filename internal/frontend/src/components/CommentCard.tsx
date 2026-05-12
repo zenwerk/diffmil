@@ -7,6 +7,7 @@ import {
   formatThreadPrompt,
   type CommitContext,
 } from "../utils/commentPrompt";
+import type { EditableItemMode } from "../utils/editMode";
 
 interface CommentCardProps {
   thread: CommentThread;
@@ -24,8 +25,7 @@ export function CommentCard({
   onCopied,
 }: CommentCardProps) {
   const message = thread.messages[0];
-  type CardMode = "view" | "edit" | "confirmDelete";
-  const [mode, setMode] = useState<CardMode>("view");
+  const [mode, setMode] = useState<EditableItemMode>("view");
 
   const handleCopy = async () => {
     const ok = await copyToClipboard(formatThreadPrompt(thread, commitContext));

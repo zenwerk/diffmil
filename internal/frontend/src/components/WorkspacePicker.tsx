@@ -2,6 +2,8 @@ import { useState } from "react";
 import { FolderGit2, Check, Edit2, Trash2 } from "lucide-react";
 import type { Workspace } from "../types";
 import { useDropdown } from "../hooks/useDropdown";
+import { findById } from "../utils/list";
+import type { EditableItemMode } from "../utils/editMode";
 
 interface WorkspacePickerProps {
   workspaces: Workspace[];
@@ -28,8 +30,7 @@ function Entry({
   onRemove,
   onRename,
 }: EntryProps) {
-  type EntryMode = "view" | "edit" | "confirmDelete";
-  const [mode, setMode] = useState<EntryMode>("view");
+  const [mode, setMode] = useState<EditableItemMode>("view");
   const [draftLabel, setDraftLabel] = useState(workspace.label);
 
   if (mode === "edit") {
@@ -152,7 +153,7 @@ export function WorkspacePicker({
   onRename,
 }: WorkspacePickerProps) {
   const { open, setOpen, containerRef } = useDropdown();
-  const active = workspaces.find((w) => w.id === activeId) ?? null;
+  const active = activeId ? findById(workspaces, activeId) ?? null : null;
 
   if (workspaces.length === 0) return null;
 

@@ -319,17 +319,14 @@ func TestSSEEventCarriesWorkspaceID(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Consume the initial "connected" event.
+	// Consume the initial "connected" event; once it's been received the
+	// subscriber is registered and we can publish without further delay.
 	reader := bufio.NewReader(resp.Body)
 	if _, err := readSSEFrame(reader); err != nil {
 		t.Fatalf("read initial frame: %v", err)
 	}
 
-	// Trigger a commits-changed event from a goroutine.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		state.NotifyCommitsChanged(wsID)
-	}()
+	go state.NotifyCommitsChanged(wsID)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

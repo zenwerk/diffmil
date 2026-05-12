@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Workspace } from "../types";
 import { loadFromStorage, saveToStorage } from "../utils/storage";
+import { findById } from "../utils/list";
 
 const ACTIVE_WS_KEY = "diffmil.activeWorkspace";
 
@@ -17,6 +18,8 @@ function getUrlWs(): string | null {
 }
 
 function setUrlWs(id: string | null) {
+  const current = getUrlWs();
+  if (current === id) return;
   const url = new URL(window.location.href);
   if (id) {
     url.searchParams.set("ws", id);
@@ -56,7 +59,7 @@ export function useWorkspaces() {
   // Fall back to the first workspace when the persisted ID is no longer valid.
   useEffect(() => {
     if (workspaces.length === 0) return;
-    if (!activeId || !workspaces.some((w) => w.id === activeId)) {
+    if (!activeId || !findById(workspaces, activeId)) {
       setActiveIdState(workspaces[0].id);
     }
   }, [workspaces, activeId]);
@@ -123,7 +126,7 @@ export function useWorkspaces() {
     [refresh],
   );
 
-  const active = workspaces.find((w) => w.id === activeId) ?? null;
+  const active = activeId ? findById(workspaces, activeId) ?? null : null;
 
   return {
     workspaces,

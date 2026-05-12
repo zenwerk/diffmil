@@ -265,7 +265,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 		cancel()
 	}
 
-	restartRequested := false
+	restartCh := make(chan struct{}, 1)
 
 	go func() {
 		select {
@@ -274,7 +274,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 		case <-state.ShutdownCh():
 			shutdown()
 		case <-state.RestartCh():
-			restartRequested = true
+			restartCh <- struct{}{}
 			shutdown()
 		}
 	}()
@@ -285,6 +285,13 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 
 	cancel()
 	<-backupDone
+
+	restartRequested := false
+	select {
+	case <-restartCh:
+		restartRequested = true
+	default:
+	}
 
 	if restartRequested {
 		time.Sleep(200 * time.Millisecond)
@@ -497,13 +504,7 @@ func postDiff(baseURL string, diffResp *diff.DiffResponse) error {
 	return nil
 }
 
-type workspaceResponse struct {
-	ID    string `json:"id"`
-	Dir   string `json:"dir"`
-	Label string `json:"label"`
-}
-
-func postWorkspace(baseURL, dir string) (*workspaceResponse, error) {
+func postWorkspace(baseURL, dir string) (*server.Workspace, error) {
 	body, err := json.Marshal(map[string]string{"dir": dir})
 	if err != nil {
 		return nil, err
@@ -518,7 +519,7 @@ func postWorkspace(baseURL, dir string) (*workspaceResponse, error) {
 		b, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	var ws workspaceResponse
+	var ws server.Workspace
 	if err := json.NewDecoder(resp.Body).Decode(&ws); err != nil {
 		return nil, err
 	}
