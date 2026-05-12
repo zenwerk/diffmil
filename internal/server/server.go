@@ -40,7 +40,15 @@ type State struct {
 	// WorkspaceAdded is invoked synchronously when a new workspace is registered.
 	// Callers can use it to start per-workspace background work (e.g. a git watcher).
 	WorkspaceAdded func(ws *Workspace)
+
+	// dirty is signalled (non-blocking) whenever the workspace list mutates.
+	// Callers can subscribe via DirtyCh() to persist the latest snapshot.
+	dirty chan struct{}
 }
+
+// DirtyCh returns a channel that receives a non-blocking signal whenever the
+// workspace list changes. The channel buffers a single pending notification.
+func (s *State) DirtyCh() <-chan struct{} { return s.dirty }
 
 func (s *State) ShutdownCh() <-chan struct{} { return s.shutdownCh }
 func (s *State) RestartCh() <-chan struct{}  { return s.restartCh }
@@ -57,6 +65,7 @@ func newState(cfg Config) *State {
 		subscribers: make(map[chan sseEvent]struct{}),
 		shutdownCh:  make(chan struct{}),
 		restartCh:   make(chan struct{}),
+		dirty:       make(chan struct{}, 1),
 	}
 	if cfg.RepoDir != "" {
 		ws := newWorkspace(cfg.RepoDir)
@@ -125,7 +134,16 @@ func (s *State) AddWorkspace(dir string) (*Workspace, bool) {
 		s.WorkspaceAdded(&ws)
 	}
 	s.notify(sseEvent{Name: "workspaces-changed", Data: "{}"})
+	s.markDirty()
 	return &ws, true
+}
+
+// markDirty sends a non-blocking signal on the dirty channel.
+func (s *State) markDirty() {
+	select {
+	case s.dirty <- struct{}{}:
+	default:
+	}
 }
 
 // SetDiff replaces the cached diff for the given workspace ID.

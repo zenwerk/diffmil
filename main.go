@@ -18,6 +18,7 @@ import (
 
 	"github.com/bluekeyes/go-gitdiff/gitdiff"
 	"github.com/pkg/browser"
+	"github.com/zenwerk/diffmil/internal/backup"
 	"github.com/zenwerk/diffmil/internal/diff"
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
 	"github.com/zenwerk/diffmil/internal/pidfile"
@@ -155,6 +156,17 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 	}
 	defer pidfile.Remove(port)
 
+	// Restore previously tracked workspaces (if any).
+	for _, entry := range backup.Load(port).Workspaces {
+		if entry.Dir == "" || entry.Dir == cfg.RepoDir {
+			continue
+		}
+		if !gitcmd.IsGitRepo(entry.Dir) {
+			continue
+		}
+		state.AddWorkspace(entry.Dir)
+	}
+
 	url := fmt.Sprintf("http://localhost:%d", port)
 	fmt.Fprintf(os.Stderr, "diffmil: serving at %s (pid %d)\n", url, os.Getpid())
 
@@ -199,6 +211,38 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 		startWatcher(ws.Dir, ws.ID)
 	}
 
+	// Persist workspaces with debouncing on State.DirtyCh().
+	backupDone := make(chan struct{})
+	go func() {
+		defer close(backupDone)
+		var pending *time.Timer
+		flush := func() {
+			snap := state.Workspaces()
+			entries := make([]backup.WorkspaceEntry, 0, len(snap))
+			for _, ws := range snap {
+				entries = append(entries, backup.WorkspaceEntry{Dir: ws.Dir})
+			}
+			if err := backup.Save(port, backup.State{Workspaces: entries}); err != nil {
+				log.Printf("warning: failed to save workspaces backup: %v", err)
+			}
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				if pending != nil {
+					pending.Stop()
+				}
+				flush()
+				return
+			case <-state.DirtyCh():
+				if pending != nil {
+					pending.Stop()
+				}
+				pending = time.AfterFunc(500*time.Millisecond, flush)
+			}
+		}
+	}()
+
 	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: handler}
 
@@ -206,6 +250,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		srv.Shutdown(shutdownCtx)
+		cancel()
 	}
 
 	restartRequested := false
@@ -225,6 +270,9 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+
+	cancel()
+	<-backupDone
 
 	if restartRequested {
 		time.Sleep(200 * time.Millisecond)
