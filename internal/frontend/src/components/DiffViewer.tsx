@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ThemedToken } from "shiki";
 import type {
@@ -16,7 +16,7 @@ import { useHighlighter, detectLanguage } from "../hooks/useHighlighter";
 import { STATUS_META } from "../constants/status";
 import { isAutoFoldPath } from "../constants/autoFold";
 import type { CommitContext } from "../utils/commentPrompt";
-import { pickSideAndLine } from "../utils/diffLine";
+import { collectRangeSnapshot, pickSideAndLine } from "../utils/diffLine";
 
 interface DiffViewerProps {
   file: DiffFile;
@@ -30,6 +30,7 @@ interface DiffViewerProps {
     filePath: string;
     side: DiffSide;
     line: number;
+    endLine?: number;
     body: string;
     codeSnapshot: string;
   }) => void;
@@ -40,7 +41,17 @@ interface DiffViewerProps {
 
 interface PendingForm {
   side: DiffSide;
+  // line/endLine are the inclusive range. For single-line comments they are equal.
   line: number;
+  endLine: number;
+  // anchorLine is the originating line of this selection — set by the initial
+  // plain click and never moved by subsequent Shift+clicks. Range endpoints
+  // are recomputed as min/max(anchorLine, latest shift-click line).
+  anchorLine: number;
+  // formAt is the line under which the comment input is rendered. Matches the
+  // most recent Shift+clicked line (GitHub shows the form under the
+  // terminal line of the range).
+  formAt: number;
   content: string;
 }
 
@@ -65,6 +76,28 @@ export function DiffViewer({
   const autoFold = isAutoFoldPath(file.path);
   const { ready, highlightLines } = useHighlighter();
   const [pending, setPending] = useState<PendingForm | null>(null);
+  // shiftHeld drives row-level UI changes while the user holds Shift: the
+  // per-line "add comment" button is hidden so it doesn't block clicks on the
+  // line itself, mirroring how GitHub PR review behaves during range selection.
+  const [shiftHeld, setShiftHeld] = useState(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(false);
+    };
+    // window blur can leave Shift "stuck" if the user releases off-window.
+    const blur = () => setShiftHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
 
   const threadsByLine = useMemo(() => {
     const map = new Map<string, CommentThread[]>();
@@ -106,18 +139,67 @@ export function DiffViewer({
     return result;
   }, [ready, file, shikiTheme, highlightLines, collapsed]);
 
-  const handleAddComment = (side: DiffSide, line: number, content: string) => {
-    setPending({ side, line, content });
+  const handleAddComment = (
+    side: DiffSide,
+    line: number,
+    content: string,
+    extend: boolean,
+  ) => {
+    // Shift+click with an open pending form on the same side.
+    if (extend && pending && pending.side === side && pending.anchorLine !== line) {
+      // Clicking above the anchor cancels the existing selection and starts a
+      // fresh single-line pending at the clicked line.
+      if (line < pending.anchorLine) {
+        setPending({ side, line, endLine: line, anchorLine: line, formAt: line, content });
+        return;
+      }
+      // Otherwise extend the range downward from the unchanged anchor.
+      const snapshot = collectRangeSnapshot(file, side, pending.anchorLine, line);
+      setPending({
+        side,
+        line: pending.anchorLine,
+        endLine: line,
+        anchorLine: pending.anchorLine,
+        formAt: line,
+        content: snapshot,
+      });
+      return;
+    }
+    // Plain click (or Shift+click without a prior pending form): single-line form.
+    setPending({ side, line, endLine: line, anchorLine: line, formAt: line, content });
+  };
+
+  const rangeStateFor = (
+    targetSide: DiffSide,
+    targetLine: number,
+  ): "anchor" | "in-range" | null => {
+    if (!pending || pending.side !== targetSide) return null;
+    if (targetLine < pending.line || targetLine > pending.endLine) return null;
+    return targetLine === pending.anchorLine ? "anchor" : "in-range";
+  };
+
+  const rangeStateForLineUnified = (line: DiffLine): "anchor" | "in-range" | null => {
+    const t = pickSideAndLine(line);
+    if (!t) return null;
+    return rangeStateFor(t.side, t.lineNumber);
+  };
+
+  const rangeStateForSplit = (
+    side: DiffSide,
+    line: DiffLine,
+  ): "anchor" | "in-range" | null => {
+    const ln = side === "old" ? line.oldLineNumber : line.newLineNumber;
+    if (ln == null) return null;
+    return rangeStateFor(side, ln);
   };
 
   const renderExtra = (
     targetSide: DiffSide,
     targetLine: number,
-    content: string,
   ): ReactNode => {
     const key = lineKey(targetSide, targetLine);
     const lineThreads = threadsByLine.get(key) ?? [];
-    const showForm = pending?.side === targetSide && pending.line === targetLine;
+    const showForm = pending?.side === targetSide && pending.formAt === targetLine;
     if (lineThreads.length === 0 && !showForm) return null;
     return (
       <div className="flex flex-col gap-2">
@@ -131,15 +213,16 @@ export function DiffViewer({
             onCopied={onCommentCopied}
           />
         ))}
-        {showForm && (
+        {showForm && pending && (
           <CommentForm
             onSubmit={(body) => {
               onAddComment({
                 filePath: file.path,
-                side: targetSide,
-                line: targetLine,
+                side: pending.side,
+                line: pending.line,
+                endLine: pending.endLine !== pending.line ? pending.endLine : undefined,
                 body,
-                codeSnapshot: content,
+                codeSnapshot: pending.content,
               });
               setPending(null);
             }}
@@ -153,13 +236,13 @@ export function DiffViewer({
   const renderUnifiedExtra = (line: DiffLine): ReactNode => {
     const target = pickSideAndLine(line);
     if (!target) return null;
-    return renderExtra(target.side, target.lineNumber, line.content);
+    return renderExtra(target.side, target.lineNumber);
   };
 
   const renderSplitExtra = (line: DiffLine, side: DiffSide): ReactNode => {
     const lineNumber = side === "old" ? line.oldLineNumber : line.newLineNumber;
     if (lineNumber == null) return null;
-    return renderExtra(side, lineNumber, line.content);
+    return renderExtra(side, lineNumber);
   };
 
   return (
@@ -241,6 +324,8 @@ export function DiffViewer({
                     lineTokens={allLineTokens?.[i]}
                     onAddComment={handleAddComment}
                     renderLineExtra={renderSplitExtra}
+                    rangeStateFor={rangeStateForSplit}
+                    hideAddButton={shiftHeld}
                   />
                 ) : (
                   <DiffChunk
@@ -249,6 +334,8 @@ export function DiffViewer({
                     lineTokens={allLineTokens?.[i]}
                     onAddComment={handleAddComment}
                     renderLineExtra={renderUnifiedExtra}
+                    rangeStateForLine={rangeStateForLineUnified}
+                    hideAddButton={shiftHeld}
                   />
                 ),
               )}

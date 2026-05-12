@@ -61,6 +61,9 @@ export interface CommentThread {
   filePath: string;
   side: DiffSide;
   line: number;
+  // endLine is the last line of a multi-line range. Single-line threads
+  // omit this field (or set it equal to `line`).
+  endLine?: number;
   codeSnapshot: string;
   createdAt: string;
   updatedAt: string;

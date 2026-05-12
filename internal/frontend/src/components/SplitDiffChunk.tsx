@@ -1,4 +1,4 @@
-import { Fragment, useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, type MouseEvent, type ReactNode } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import type { ThemedToken } from "shiki";
 import type { DiffChunk, DiffLine, DiffSide } from "../types";
@@ -8,8 +8,15 @@ import { LINE_PREFIX, LINE_BG } from "../constants/diff";
 interface SplitDiffChunkProps {
   chunk: DiffChunk;
   lineTokens?: (ThemedToken[] | undefined)[];
-  onAddComment?: (side: DiffSide, lineNumber: number, content: string) => void;
+  onAddComment?: (
+    side: DiffSide,
+    lineNumber: number,
+    content: string,
+    extend: boolean,
+  ) => void;
   renderLineExtra?: (line: DiffLine, side: DiffSide) => ReactNode;
+  rangeStateFor?: (side: DiffSide, line: DiffLine) => "anchor" | "in-range" | null;
+  hideAddButton?: boolean;
 }
 
 interface SplitRow {
@@ -78,10 +85,19 @@ function SplitCell({
   cell,
   side,
   onAddComment,
+  rangeState,
+  hideAddButton,
 }: {
   cell: { line: DiffLine; tokens?: ThemedToken[] } | null;
   side: DiffSide;
-  onAddComment?: (side: DiffSide, lineNumber: number, content: string) => void;
+  onAddComment?: (
+    side: DiffSide,
+    lineNumber: number,
+    content: string,
+    extend: boolean,
+  ) => void;
+  rangeState?: "anchor" | "in-range" | null;
+  hideAddButton?: boolean;
 }) {
   if (!cell) {
     return (
@@ -93,22 +109,37 @@ function SplitCell({
   }
 
   const { line, tokens } = cell;
-  const bg = LINE_BG[line.type] ?? "";
+  const baseBg = LINE_BG[line.type] ?? "";
+  const rangeBg =
+    rangeState === "anchor"
+      ? "bg-blue-500/20"
+      : rangeState === "in-range"
+        ? "bg-blue-500/10"
+        : "";
+  const bg = rangeBg || baseBg;
   const lineNum =
     side === "old" ? line.oldLineNumber : line.newLineNumber;
   const canComment = onAddComment != null && lineNum != null;
+  const showButton = canComment && !hideAddButton;
+  // While Shift is held the line-number cell itself becomes a Shift+click
+  // target so the user can still extend the range.
+  const handleGutterClick = (e: MouseEvent) => {
+    if (!canComment || !e.shiftKey) return;
+    onAddComment!(side, lineNum!, line.content, true);
+  };
 
   return (
     <>
       <td
-        className={`w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap relative ${bg}`}
+        onClick={handleGutterClick}
+        className={`w-[1%] min-w-[40px] px-1.5 text-right text-gh-text-muted select-none font-mono text-[0.85em] align-top whitespace-nowrap relative ${bg} ${hideAddButton && canComment ? "cursor-pointer hover:bg-blue-500/15" : ""}`}
       >
         {lineNum ?? ""}
-        {canComment && (
+        {showButton && (
           <button
             type="button"
-            onClick={() => onAddComment(side, lineNum, line.content)}
-            title="コメントを追加"
+            onClick={(e) => onAddComment!(side, lineNum!, line.content, e.shiftKey)}
+            title="クリックでコメント / Shift+クリックで複数行コメント"
             className="absolute -right-2 top-0 z-10 hidden group-hover:flex items-center justify-center w-5 h-5 rounded bg-blue-500 text-white hover:bg-blue-600 shadow"
           >
             <MessageSquarePlus size={12} />
@@ -130,6 +161,8 @@ export function SplitDiffChunk({
   lineTokens,
   onAddComment,
   renderLineExtra,
+  rangeStateFor,
+  hideAddButton,
 }: SplitDiffChunkProps) {
   const rows = useMemo(
     () => buildSplitRows(chunk, lineTokens),
@@ -149,11 +182,25 @@ export function SplitDiffChunk({
       {rows.map((row, i) => {
         const leftExtra = row.left ? renderLineExtra?.(row.left.line, "old") : null;
         const rightExtra = row.right ? renderLineExtra?.(row.right.line, "new") : null;
+        const leftRange = row.left ? rangeStateFor?.("old", row.left.line) ?? null : null;
+        const rightRange = row.right ? rangeStateFor?.("new", row.right.line) ?? null : null;
         return (
           <Fragment key={i}>
             <tr className="group">
-              <SplitCell cell={row.left} side="old" onAddComment={onAddComment} />
-              <SplitCell cell={row.right} side="new" onAddComment={onAddComment} />
+              <SplitCell
+                cell={row.left}
+                side="old"
+                onAddComment={onAddComment}
+                rangeState={leftRange}
+                hideAddButton={hideAddButton}
+              />
+              <SplitCell
+                cell={row.right}
+                side="new"
+                onAddComment={onAddComment}
+                rangeState={rightRange}
+                hideAddButton={hideAddButton}
+              />
             </tr>
             {(leftExtra || rightExtra) && (
               <tr>

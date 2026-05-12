@@ -4,6 +4,7 @@ import type { CommentThread } from "../types";
 import { CommentForm } from "./CommentForm";
 import {
   copyToClipboard,
+  formatLineRange,
   formatThreadPrompt,
   type CommitContext,
 } from "../utils/commentPrompt";
@@ -36,7 +37,7 @@ export function CommentCard({
     <div className="bg-gh-bg-secondary border border-gh-border rounded p-3 text-sm">
       <div className="flex items-center gap-2 mb-2 text-xs text-gh-text-muted">
         <span className="font-mono">
-          {thread.filePath}:L{thread.line}
+          {thread.filePath}:{formatLineRange(thread)}
         </span>
         <span className="px-1.5 py-0.5 rounded bg-gh-bg-tertiary text-[10px]">
           {thread.side}

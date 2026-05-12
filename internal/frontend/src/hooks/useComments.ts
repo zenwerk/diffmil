@@ -49,6 +49,7 @@ export function listCommitsWithComments(wsId: string | null): Set<string> {
 function isValidThread(t: unknown): t is CommentThread {
   if (!t || typeof t !== "object") return false;
   const obj = t as Record<string, unknown>;
+  if (obj.endLine !== undefined && typeof obj.endLine !== "number") return false;
   return (
     typeof obj.id === "string" &&
     typeof obj.filePath === "string" &&
@@ -85,6 +86,7 @@ export interface UseCommentsResult {
     filePath: string;
     side: DiffSide;
     line: number;
+    endLine?: number;
     body: string;
     codeSnapshot: string;
   }) => void;
@@ -121,7 +123,7 @@ export function useComments(
   }, []);
 
   const addThread = useCallback<UseCommentsResult["addThread"]>(
-    ({ filePath, side, line, body, codeSnapshot }) => {
+    ({ filePath, side, line, endLine, body, codeSnapshot }) => {
       const hash = commitHashRef.current;
       if (!hash) return;
       const now = new Date().toISOString();
@@ -136,6 +138,7 @@ export function useComments(
         updatedAt: now,
         messages: [{ id: createId(), body, createdAt: now, updatedAt: now }],
       };
+      if (endLine != null && endLine !== line) thread.endLine = endLine;
       setThreads((prev) => persist([...prev, thread]));
     },
     [persist],

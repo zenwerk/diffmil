@@ -21,13 +21,19 @@ function makeThread(overrides: Partial<CommentThread> = {}): CommentThread {
 const addOne = (
   result: { current: ReturnType<typeof useComments> },
   body: string,
-  overrides: Partial<{ filePath: string; line: number; side: "old" | "new" }> = {},
+  overrides: Partial<{
+    filePath: string;
+    line: number;
+    endLine: number;
+    side: "old" | "new";
+  }> = {},
 ) => {
   act(() => {
     result.current.addThread({
       filePath: overrides.filePath ?? "src/foo.ts",
       side: overrides.side ?? "new",
       line: overrides.line ?? 1,
+      endLine: overrides.endLine,
       body,
       codeSnapshot: "code",
     });
@@ -81,6 +87,41 @@ describe("useComments", () => {
     localStorage.setItem(
       "diffmil.comments.ws1.h",
       JSON.stringify([makeThread({ id: "ok" }), { broken: true }]),
+    );
+    const { result } = renderHook(() => useComments("ws1", "h"));
+    expect(result.current.threads).toHaveLength(1);
+    expect(result.current.threads[0].id).toBe("ok");
+  });
+
+  it("stores endLine for multi-line threads but omits it for single-line", () => {
+    const { result } = renderHook(() => useComments("ws1", "h"));
+    addOne(result, "single");
+    addOne(result, "ranged", { line: 5, endLine: 8 });
+    // endLine === line should be normalized to undefined to save a few bytes
+    // and keep the legacy on-disk shape for single-line threads.
+    addOne(result, "same", { line: 3, endLine: 3 });
+    expect(result.current.threads[0].endLine).toBeUndefined();
+    expect(result.current.threads[1].endLine).toBe(8);
+    expect(result.current.threads[2].endLine).toBeUndefined();
+  });
+
+  it("loads legacy threads without endLine field as valid", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.h",
+      JSON.stringify([makeThread({ id: "legacy" })]),
+    );
+    const { result } = renderHook(() => useComments("ws1", "h"));
+    expect(result.current.threads).toHaveLength(1);
+    expect(result.current.threads[0].endLine).toBeUndefined();
+  });
+
+  it("rejects threads with non-numeric endLine", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.h",
+      JSON.stringify([
+        makeThread({ id: "ok" }),
+        { ...makeThread({ id: "bad" }), endLine: "5" },
+      ]),
     );
     const { result } = renderHook(() => useComments("ws1", "h"));
     expect(result.current.threads).toHaveLength(1);

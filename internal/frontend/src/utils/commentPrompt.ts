@@ -31,11 +31,20 @@ export function toCommitContext(commit: Commit | null, fallbackHash: string): Co
   return { hash: fallbackHash };
 }
 
+export function formatLineRange(thread: Pick<CommentThread, "line" | "endLine">): string {
+  if (thread.endLine != null && thread.endLine !== thread.line) {
+    const lo = Math.min(thread.line, thread.endLine);
+    const hi = Math.max(thread.line, thread.endLine);
+    return `L${lo}-L${hi}`;
+  }
+  return `L${thread.line}`;
+}
+
 export function formatThreadPrompt(thread: CommentThread, commit?: CommitContext): string {
   const lines: string[] = [];
   const ctx = commit ?? { hash: thread.commitHash };
   lines.push(formatCommitHeader(ctx));
-  lines.push(`File: ${thread.filePath}:L${thread.line} (${thread.side})`);
+  lines.push(`File: ${thread.filePath}:${formatLineRange(thread)} (${thread.side})`);
   lines.push("```");
   lines.push(thread.codeSnapshot);
   lines.push("```");

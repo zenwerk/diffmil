@@ -6,8 +6,15 @@ import { DiffLineRow } from "./DiffLineRow";
 interface DiffChunkProps {
   chunk: DiffChunkType;
   lineTokens?: (ThemedToken[] | undefined)[];
-  onAddComment?: (side: DiffSide, lineNumber: number, content: string) => void;
+  onAddComment?: (
+    side: DiffSide,
+    lineNumber: number,
+    content: string,
+    extend: boolean,
+  ) => void;
   renderLineExtra?: (line: DiffLine) => ReactNode;
+  rangeStateForLine?: (line: DiffLine) => "anchor" | "in-range" | null;
+  hideAddButton?: boolean;
 }
 
 export function DiffChunk({
@@ -15,6 +22,8 @@ export function DiffChunk({
   lineTokens,
   onAddComment,
   renderLineExtra,
+  rangeStateForLine,
+  hideAddButton,
 }: DiffChunkProps) {
   return (
     <>
@@ -34,6 +43,8 @@ export function DiffChunk({
               line={line}
               tokens={lineTokens?.[i]}
               onAddComment={onAddComment}
+              rangeState={rangeStateForLine?.(line) ?? null}
+              hideAddButton={hideAddButton}
             />
             {extra && (
               <tr>

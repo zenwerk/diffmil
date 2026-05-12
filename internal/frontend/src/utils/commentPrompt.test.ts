@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatLineRange,
   formatThreadPrompt,
   formatAllThreadsPrompt,
   toCommitContext,
@@ -26,12 +27,38 @@ const mkThread = (overrides: Partial<CommentThread> = {}): CommentThread => ({
   ...overrides,
 });
 
+describe("formatLineRange", () => {
+  it("formats a single line as Lnnn", () => {
+    expect(formatLineRange({ line: 42 })).toBe("L42");
+  });
+
+  it("omits range when endLine equals line", () => {
+    expect(formatLineRange({ line: 42, endLine: 42 })).toBe("L42");
+  });
+
+  it("formats a range as Lstart-Lend", () => {
+    expect(formatLineRange({ line: 10, endLine: 20 })).toBe("L10-L20");
+  });
+
+  it("orders endpoints when given out of order", () => {
+    expect(formatLineRange({ line: 20, endLine: 10 })).toBe("L10-L20");
+  });
+});
+
 describe("formatThreadPrompt", () => {
   it("includes file, line, side, code, body", () => {
     const out = formatThreadPrompt(mkThread());
     expect(out).toContain("src/foo.ts:L42 (new)");
     expect(out).toContain("const x = 1");
     expect(out).toContain("ここは null チェック必要では？");
+  });
+
+  it("renders a line range when endLine is set", () => {
+    const out = formatThreadPrompt(
+      mkThread({ line: 10, endLine: 14, codeSnapshot: "a\nb\nc" }),
+    );
+    expect(out).toContain("src/foo.ts:L10-L14 (new)");
+    expect(out).toContain("a\nb\nc");
   });
 
   it("includes commit header when context is provided", () => {
