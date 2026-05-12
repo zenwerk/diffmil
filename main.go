@@ -180,7 +180,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 
 	startWatcher := func(dir, id string) {
 		gw, err := watcher.New(dir, func() {
-			state.NotifyCommitsChanged()
+			state.NotifyCommitsChanged(id)
 		})
 		if err != nil {
 			log.Printf("warning: failed to start git watcher for %s: %v", dir, err)

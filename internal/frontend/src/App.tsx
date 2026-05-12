@@ -290,7 +290,20 @@ function AppContent() {
   useEffect(() => {
     const es = new EventSource("/_/events");
 
-    es.addEventListener("update", () => {
+    // A payload without a workspaceId is treated as relevant to all (legacy/broadcast).
+    const isRelevant = (data: string): boolean => {
+      try {
+        const parsed = JSON.parse(data || "{}");
+        const eventWs = parsed.workspaceId;
+        if (!eventWs) return true;
+        return eventWs === wsId;
+      } catch {
+        return true;
+      }
+    };
+
+    es.addEventListener("update", (e) => {
+      if (!isRelevant((e as MessageEvent).data)) return;
       fetch("/_/api/diff" + wsParam)
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -303,7 +316,8 @@ function AppContent() {
         .catch(() => {});
     });
 
-    es.addEventListener("commits-changed", () => {
+    es.addEventListener("commits-changed", (e) => {
+      if (!isRelevant((e as MessageEvent).data)) return;
       fetchCommits().then((commitList) => {
         setCommits(commitList);
         setToastMessage("New commits detected");
@@ -317,7 +331,7 @@ function AppContent() {
     es.onerror = () => {};
 
     return () => es.close();
-  }, [wsParam, fetchCommits, refreshWorkspaces]);
+  }, [wsParam, wsId, fetchCommits, refreshWorkspaces]);
 
   const handleSelectCommit = useCallback(
     (hash: string) => {

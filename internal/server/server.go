@@ -32,7 +32,7 @@ type State struct {
 	diffs map[string]*diff.DiffResponse
 
 	subMu       sync.RWMutex
-	subscribers map[chan string]struct{}
+	subscribers map[chan sseEvent]struct{}
 
 	shutdownCh chan struct{}
 	restartCh  chan struct{}
@@ -45,10 +45,16 @@ type State struct {
 func (s *State) ShutdownCh() <-chan struct{} { return s.shutdownCh }
 func (s *State) RestartCh() <-chan struct{}  { return s.restartCh }
 
+// sseEvent represents a single Server-Sent Event payload delivered to clients.
+type sseEvent struct {
+	Name string
+	Data string
+}
+
 func newState(cfg Config) *State {
 	s := &State{
 		diffs:       make(map[string]*diff.DiffResponse),
-		subscribers: make(map[chan string]struct{}),
+		subscribers: make(map[chan sseEvent]struct{}),
 		shutdownCh:  make(chan struct{}),
 		restartCh:   make(chan struct{}),
 	}
@@ -118,7 +124,7 @@ func (s *State) AddWorkspace(dir string) (*Workspace, bool) {
 	if s.WorkspaceAdded != nil {
 		s.WorkspaceAdded(&ws)
 	}
-	s.notify("workspaces-changed")
+	s.notify(sseEvent{Name: "workspaces-changed", Data: "{}"})
 	return &ws, true
 }
 
@@ -127,12 +133,22 @@ func (s *State) SetDiff(wsID string, resp *diff.DiffResponse) {
 	s.mu.Lock()
 	s.diffs[wsID] = resp
 	s.mu.Unlock()
-	s.notify("update")
+	s.notify(workspaceEvent("update", wsID))
 }
 
-// NotifyCommitsChanged sends a commits-changed event to all SSE subscribers.
-func (s *State) NotifyCommitsChanged() {
-	s.notify("commits-changed")
+// NotifyCommitsChanged sends a commits-changed event scoped to a workspace.
+// Pass an empty string to broadcast (used only as a legacy fallback).
+func (s *State) NotifyCommitsChanged(wsID string) {
+	s.notify(workspaceEvent("commits-changed", wsID))
+}
+
+// workspaceEvent builds an SSE event with a JSON payload containing the workspace ID.
+func workspaceEvent(name, wsID string) sseEvent {
+	if wsID == "" {
+		return sseEvent{Name: name, Data: "{}"}
+	}
+	// Hand-rolled JSON to avoid the overhead of json.Marshal for a single field.
+	return sseEvent{Name: name, Data: `{"workspaceId":"` + wsID + `"}`}
 }
 
 func (s *State) getDiff(wsID string) *diff.DiffResponse {
@@ -144,22 +160,22 @@ func (s *State) getDiff(wsID string) *diff.DiffResponse {
 	return s.diffs[wsID]
 }
 
-func (s *State) subscribe() chan string {
-	ch := make(chan string, 8)
+func (s *State) subscribe() chan sseEvent {
+	ch := make(chan sseEvent, 16)
 	s.subMu.Lock()
 	s.subscribers[ch] = struct{}{}
 	s.subMu.Unlock()
 	return ch
 }
 
-func (s *State) unsubscribe(ch chan string) {
+func (s *State) unsubscribe(ch chan sseEvent) {
 	s.subMu.Lock()
 	delete(s.subscribers, ch)
 	s.subMu.Unlock()
 	close(ch)
 }
 
-func (s *State) notify(event string) {
+func (s *State) notify(event sseEvent) {
 	s.subMu.RLock()
 	defer s.subMu.RUnlock()
 	for ch := range s.subscribers {
@@ -404,7 +420,11 @@ func handleSSE(state *State) http.HandlerFunc {
 				if !ok {
 					return
 				}
-				w.Write([]byte("event: " + event + "\ndata: {}\n\n"))
+				data := event.Data
+				if data == "" {
+					data = "{}"
+				}
+				w.Write([]byte("event: " + event.Name + "\ndata: " + data + "\n\n"))
 				flusher.Flush()
 			}
 		}
