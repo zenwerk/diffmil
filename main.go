@@ -21,6 +21,7 @@ import (
 	"github.com/zenwerk/diffmil/internal/backup"
 	"github.com/zenwerk/diffmil/internal/diff"
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
+	"github.com/zenwerk/diffmil/internal/mdns"
 	"github.com/zenwerk/diffmil/internal/pidfile"
 	"github.com/zenwerk/diffmil/internal/server"
 	"github.com/zenwerk/diffmil/internal/watcher"
@@ -44,6 +45,16 @@ Examples:
   diffmil --status                        List all running servers
   diffmil --shutdown --all                Stop all servers
   diffmil --port 3000                     Use custom port
+  diffmil --mdns                          Advertise difmil.local on the LAN
+  diffmil --mdns --mdns-host myhost       Advertise myhost.local instead
+  sudo diffmil --mdns --port 80           Serve on port 80 (requires root)
+
+Notes:
+  --mdns advertises <mdns-host>.local on the LAN so other devices can reach
+  the server without knowing your IP. Access via http://<mdns-host>.local:<port>.
+  Ports below 1024 (e.g. 80) are privileged and require root, so to drop the
+  ":port" suffix you must run diffmil with sudo. For everyday use, the default
+  http://difmil.local:8080 is recommended.
 
 Options:
 `)
@@ -57,6 +68,8 @@ Options:
 	doShutdown := flag.Bool("shutdown", false, "shut down running server(s)")
 	doRestart := flag.Bool("restart", false, "restart running server")
 	all := flag.Bool("all", false, "apply to all running servers (with --shutdown or --status)")
+	enableMDNS := flag.Bool("mdns", false, "advertise <mdns-host>.local on the LAN via mDNS")
+	mdnsHost := flag.String("mdns-host", mdns.DefaultHostname, "mDNS hostname (without .local suffix)")
 	flag.Parse()
 
 	// Handle control commands
@@ -114,7 +127,7 @@ Options:
 	}
 
 	if !*foreground {
-		pid, err := spawnBackground(*port)
+		pid, err := spawnBackground(*port, *enableMDNS, *mdnsHost)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -134,7 +147,7 @@ Options:
 	}
 
 	// Foreground mode
-	runForeground(ctx, cancel, cfg, *port, *noOpen)
+	runForeground(ctx, cancel, cfg, *port, *noOpen, *enableMDNS, *mdnsHost)
 }
 
 // portExplicitlySet returns true if --port was explicitly passed on the command line.
@@ -148,13 +161,23 @@ func portExplicitlySet() bool {
 	return found
 }
 
-func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int, noOpen bool) {
+func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int, noOpen, enableMDNS bool, mdnsHost string) {
 	handler, state := server.New(cfg)
 
 	if err := pidfile.Write(port); err != nil {
 		log.Printf("warning: failed to write PID file: %v", err)
 	}
 	defer pidfile.Remove(port)
+
+	if enableMDNS {
+		shutdown, err := mdns.Start(mdnsHost, port)
+		if err != nil {
+			log.Printf("warning: mDNS disabled: %v", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "diffmil: advertising http://%s.local:%d via mDNS\n", mdnsHost, port)
+			defer shutdown()
+		}
+	}
 
 	// Restore previously tracked workspaces (if any).
 	for _, entry := range backup.Load(port).Workspaces {
@@ -302,6 +325,9 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 		}
 		cwd, _ := os.Getwd()
 		args := []string{"--port", fmt.Sprintf("%d", port), "--foreground", "--no-open"}
+		if enableMDNS {
+			args = append(args, "--mdns", "--mdns-host", mdnsHost)
+		}
 		cmd := exec.Command(binPath, args...)
 		cmd.Dir = cwd
 		setSysProcAttr(cmd)
@@ -437,7 +463,7 @@ func runRestart(url string) {
 
 // --- Background spawning ---
 
-func spawnBackground(port int) (int, error) {
+func spawnBackground(port int, enableMDNS bool, mdnsHost string) (int, error) {
 	binPath, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("cannot find binary: %w", err)
@@ -447,6 +473,9 @@ func spawnBackground(port int) (int, error) {
 		"--port", fmt.Sprintf("%d", port),
 		"--foreground",
 		"--no-open",
+	}
+	if enableMDNS {
+		args = append(args, "--mdns", "--mdns-host", mdnsHost)
 	}
 	args = append(args, flag.Args()...)
 
