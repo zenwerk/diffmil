@@ -12,34 +12,14 @@ function storageKey(commitHash: string, wsId: string | null): string {
   return KEY_PREFIX + commitHash;
 }
 
-// listCommitsWithComments scans localStorage for comment-bearing commit hashes
-// belonging to the given workspace ID. With wsId === null, the legacy flat
-// "diffmil.comments.<hash>" namespace is scanned for back-compat with data
-// saved before workspaces existed.
-export function listCommitsWithComments(wsId: string | null): Set<string> {
-  const out = new Set<string>();
-  forEachWorkspaceKey(wsId, (key) => {
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.some(isValidThread)) {
-        const prefix = wsId ? `${KEY_PREFIX}${wsId}.` : KEY_PREFIX;
-        out.add(key.slice(prefix.length));
-      }
-    } catch {
-      // ignore
-    }
-  });
-  return out;
+function workspacePrefix(wsId: string | null): string {
+  return wsId ? `${KEY_PREFIX}${wsId}.` : KEY_PREFIX;
 }
 
-// forEachWorkspaceKey iterates over localStorage keys that belong to the given
-// workspace's comment namespace. With wsId === null, the legacy flat namespace
-// is scanned. Snapshots the key list up-front so callbacks can safely mutate
-// localStorage while iterating.
+// Snapshots the key list up-front so callbacks can safely mutate localStorage
+// while iterating.
 function forEachWorkspaceKey(wsId: string | null, cb: (key: string) => void): void {
-  const prefix = wsId ? `${KEY_PREFIX}${wsId}.` : KEY_PREFIX;
+  const prefix = workspacePrefix(wsId);
   const matched: string[] = [];
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -58,82 +38,82 @@ function forEachWorkspaceKey(wsId: string | null, cb: (key: string) => void): vo
   for (const key of matched) cb(key);
 }
 
-// loadAllWorkspaceThreads returns every valid thread across all commits in the
-// given workspace, keyed by commit hash. Used for cross-commit bulk operations
-// such as "copy all" / "delete all" within a workspace.
-export function loadAllWorkspaceThreads(
-  wsId: string | null,
-): Map<string, CommentThread[]> {
-  const out = new Map<string, CommentThread[]>();
-  const prefix = wsId ? `${KEY_PREFIX}${wsId}.` : KEY_PREFIX;
+function parseThreads(raw: string | null): CommentThread[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter(isValidThread);
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+// removeAndCount removes a localStorage entry and returns the number of valid
+// threads it contained. Shared between clearAll and pruneOrphan.
+function removeAndCount(key: string): number {
+  const valid = parseThreads(localStorage.getItem(key));
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+  return valid.length;
+}
+
+// listCommitsWithComments scans localStorage for comment-bearing commit hashes
+// in the given workspace. With wsId === null, the legacy flat namespace is
+// scanned for back-compat with data saved before workspaces existed.
+export function listCommitsWithComments(wsId: string | null): Set<string> {
+  const out = new Set<string>();
+  const prefix = workspacePrefix(wsId);
   forEachWorkspaceKey(wsId, (key) => {
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      const valid = parsed.filter(isValidThread);
-      if (valid.length === 0) return;
-      out.set(key.slice(prefix.length), valid);
-    } catch {
-      // ignore
+    if (parseThreads(localStorage.getItem(key)).length > 0) {
+      out.add(key.slice(prefix.length));
     }
   });
   return out;
 }
 
-// pruneOrphanWorkspaceComments removes comment entries for commit hashes that
-// no longer exist in `keepHashes`. Returns the number of *threads* dropped so
-// the caller can surface a toast / log. Used when the upstream commit history
-// changes (reset --hard, branch switch, force-push) and previously-commented
-// commits are no longer reachable.
+export function loadAllWorkspaceThreads(
+  wsId: string | null,
+): Map<string, CommentThread[]> {
+  const out = new Map<string, CommentThread[]>();
+  const prefix = workspacePrefix(wsId);
+  forEachWorkspaceKey(wsId, (key) => {
+    const valid = parseThreads(localStorage.getItem(key));
+    if (valid.length > 0) out.set(key.slice(prefix.length), valid);
+  });
+  return out;
+}
+
+export function countWorkspaceThreads(wsId: string | null): number {
+  let n = 0;
+  for (const arr of loadAllWorkspaceThreads(wsId).values()) n += arr.length;
+  return n;
+}
+
+// pruneOrphanWorkspaceComments removes entries whose commit hash is not in
+// `keepHashes`. Returns the number of *threads* dropped. Used when upstream
+// history changes (reset --hard, branch switch, force-push) leave orphans.
 export function pruneOrphanWorkspaceComments(
   wsId: string | null,
   keepHashes: Set<string>,
 ): number {
   let removed = 0;
-  const prefix = wsId ? `${KEY_PREFIX}${wsId}.` : KEY_PREFIX;
+  const prefix = workspacePrefix(wsId);
   forEachWorkspaceKey(wsId, (key) => {
     const hash = key.slice(prefix.length);
     if (keepHashes.has(hash)) return;
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) removed += parsed.filter(isValidThread).length;
-      } catch {
-        // ignore
-      }
-    }
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // ignore
-    }
+    removed += removeAndCount(key);
   });
   return removed;
 }
 
-// clearAllWorkspaceComments removes every comment-bearing localStorage entry
-// for the given workspace. Returns the number of removed *threads* (not keys)
-// so the caller can show a meaningful toast.
 export function clearAllWorkspaceComments(wsId: string | null): number {
   let removed = 0;
   forEachWorkspaceKey(wsId, (key) => {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) removed += parsed.filter(isValidThread).length;
-      } catch {
-        // ignore
-      }
-    }
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // ignore
-    }
+    removed += removeAndCount(key);
   });
   return removed;
 }
@@ -156,13 +136,8 @@ function loadThreads(wsId: string | null, commitHash: string): CommentThread[] {
   return loadFromStorage<CommentThread[]>(
     storageKey(commitHash, wsId),
     (raw) => {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.filter(isValidThread);
-      } catch {
-        // ignore
-      }
-      return undefined;
+      const parsed = parseThreads(raw);
+      return parsed.length > 0 ? parsed : undefined;
     },
     [],
   );

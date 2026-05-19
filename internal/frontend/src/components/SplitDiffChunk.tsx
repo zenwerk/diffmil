@@ -3,7 +3,7 @@ import { MessageSquarePlus } from "lucide-react";
 import type { ThemedToken } from "shiki";
 import type { DiffChunk, DiffLine, DiffSide } from "../types";
 import { TokenizedCode } from "./TokenizedCode";
-import { LINE_PREFIX, LINE_BG } from "../constants/diff";
+import { LINE_PREFIX, LINE_BG, RANGE_BG, type RangeState } from "../constants/diff";
 
 interface SplitDiffChunkProps {
   chunk: DiffChunk;
@@ -15,10 +15,7 @@ interface SplitDiffChunkProps {
     extend: boolean,
   ) => void;
   renderLineExtra?: (line: DiffLine, side: DiffSide) => ReactNode;
-  rangeStateFor?: (
-    side: DiffSide,
-    line: DiffLine,
-  ) => "anchor" | "in-range" | "committed" | null;
+  rangeStateFor?: (side: DiffSide, line: DiffLine) => RangeState | null;
   hideAddButton?: boolean;
 }
 
@@ -99,7 +96,7 @@ function SplitCell({
     content: string,
     extend: boolean,
   ) => void;
-  rangeState?: "anchor" | "in-range" | "committed" | null;
+  rangeState?: RangeState | null;
   hideAddButton?: boolean;
 }) {
   if (!cell) {
@@ -113,15 +110,7 @@ function SplitCell({
 
   const { line, tokens } = cell;
   const baseBg = LINE_BG[line.type] ?? "";
-  const rangeBg =
-    rangeState === "anchor"
-      ? "bg-blue-500/20"
-      : rangeState === "in-range"
-        ? "bg-blue-500/10"
-        : rangeState === "committed"
-          ? "bg-blue-500/10"
-          : "";
-  const bg = rangeBg || baseBg;
+  const bg = (rangeState ? RANGE_BG[rangeState] : "") || baseBg;
   const lineNum =
     side === "old" ? line.oldLineNumber : line.newLineNumber;
   const canComment = onAddComment != null && lineNum != null;

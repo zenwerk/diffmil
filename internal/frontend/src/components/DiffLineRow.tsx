@@ -3,7 +3,7 @@ import { MessageSquarePlus } from "lucide-react";
 import type { ThemedToken } from "shiki";
 import type { DiffLine, DiffSide } from "../types";
 import { TokenizedCode } from "./TokenizedCode";
-import { LINE_PREFIX, LINE_BG_HOVER } from "../constants/diff";
+import { LINE_PREFIX, LINE_BG_HOVER, RANGE_BG, type RangeState } from "../constants/diff";
 import { pickSideAndLine } from "../utils/diffLine";
 
 interface DiffLineRowProps {
@@ -15,7 +15,7 @@ interface DiffLineRowProps {
     content: string,
     extend: boolean,
   ) => void;
-  rangeState?: "anchor" | "in-range" | "committed" | null;
+  rangeState?: RangeState | null;
   hideAddButton?: boolean;
 }
 
@@ -41,14 +41,7 @@ export function DiffLineRow({
     if (!canComment || !e.shiftKey) return;
     onAddComment!(target!.side, target!.lineNumber, line.content, true);
   };
-  const rangeBg =
-    rangeState === "anchor"
-      ? "bg-blue-500/20"
-      : rangeState === "in-range"
-        ? "bg-blue-500/10"
-        : rangeState === "committed"
-          ? "bg-blue-500/10"
-          : "";
+  const rangeBg = rangeState ? RANGE_BG[rangeState] : "";
 
   return (
     <tr className={`group ${rangeBg || (LINE_BG_HOVER[line.type] ?? "hover:bg-line-hover")}`}>

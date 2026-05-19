@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import type { ThemedToken } from "shiki";
 import type { DiffChunk as DiffChunkType, DiffLine, DiffSide } from "../types";
+import type { RangeState } from "../constants/diff";
 import { DiffLineRow } from "./DiffLineRow";
 
 interface DiffChunkProps {
@@ -13,7 +14,7 @@ interface DiffChunkProps {
     extend: boolean,
   ) => void;
   renderLineExtra?: (line: DiffLine) => ReactNode;
-  rangeStateForLine?: (line: DiffLine) => "anchor" | "in-range" | "committed" | null;
+  rangeStateForLine?: (line: DiffLine) => RangeState | null;
   hideAddButton?: boolean;
 }
 

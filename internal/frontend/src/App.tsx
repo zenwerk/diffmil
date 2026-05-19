@@ -27,6 +27,7 @@ import {
   useComments,
   listCommitsWithComments,
   loadAllWorkspaceThreads,
+  countWorkspaceThreads,
   clearAllWorkspaceComments,
   pruneOrphanWorkspaceComments,
 } from "./hooks/useComments";
@@ -128,19 +129,15 @@ function AppContent() {
   const [commitsWithComments, setCommitsWithComments] = useState<Set<string>>(() =>
     listCommitsWithComments(wsId),
   );
-  // wsThreadCount is the total number of comments across every commit in the
-  // current workspace — drives the workspace-wide copy/clear buttons.
-  const [wsThreadCount, setWsThreadCount] = useState<number>(() => {
-    let n = 0;
-    for (const arr of loadAllWorkspaceThreads(wsId).values()) n += arr.length;
-    return n;
-  });
   useEffect(() => {
     setCommitsWithComments(listCommitsWithComments(wsId));
-    let n = 0;
-    for (const arr of loadAllWorkspaceThreads(wsId).values()) n += arr.length;
-    setWsThreadCount(n);
   }, [threads, selectedCommit, wsId]);
+  // Derived from storage; commitsWithComments is included in deps so it
+  // refreshes after bulk operations (clear / prune) update the set.
+  const wsThreadCount = useMemo(
+    () => countWorkspaceThreads(wsId),
+    [wsId, threads, commitsWithComments],
+  );
 
   const threadsByFile = useMemo(() => {
     const map = new Map<string, CommentThread[]>();
@@ -167,8 +164,7 @@ function AppContent() {
     [threads],
   );
 
-  // commitsRef lets the workspace-wide copy handler resolve commit metadata
-  // (subject/author/date) without re-binding when only `commits` changes.
+  // Stable ref so handleCopyWorkspacePrompts doesn't need `commits` in its deps.
   const commitsRef = useRef(commits);
   useEffect(() => {
     commitsRef.current = commits;
@@ -177,10 +173,8 @@ function AppContent() {
   const handleCopyWorkspacePrompts = useCallback(async () => {
     const byCommit = loadAllWorkspaceThreads(wsId);
     if (byCommit.size === 0) return;
-    // Group threads under their commit context so the LLM sees which commit
-    // each block of comments belongs to. Commits are emitted in the order
-    // they appear in the current commit list (newest first); any orphans
-    // (comments on commits no longer in the list) trail at the end.
+    // Emit blocks in current commit-list order so the LLM sees commits
+    // newest-first; orphans (no longer in the list) trail at the end.
     const knownOrder = new Map<string, number>();
     commitsRef.current.forEach((c, i) => knownOrder.set(c.hash, i));
     const orderedHashes = Array.from(byCommit.keys()).sort((a, b) => {
@@ -212,11 +206,8 @@ function AppContent() {
   const handleClearWorkspaceComments = useCallback(() => {
     const removed = clearAllWorkspaceComments(wsId);
     setCommitsWithComments(listCommitsWithComments(wsId));
-    setWsThreadCount(0);
-    // The hook owning the currently-loaded threads is keyed on (wsId,
-    // selectedCommit); force it to re-read from now-empty storage by toggling
-    // the commit selection if applicable. Simpler: clear the local visible
-    // threads via the hook's own clearAll, which handles the active commit.
+    // clearAll also wipes the in-memory threads for the currently-selected
+    // commit so the UI matches now-empty storage.
     clearAll();
     setConfirmClearWs(false);
     setToastMessage(`${removed}件のコメントを削除しました`);
@@ -358,38 +349,25 @@ function AppContent() {
     [wsParam],
   );
 
-  // Latest active workspace ID kept in a ref so that async callbacks resolving
-  // after a workspace switch can detect "this result is stale".
+  // Used by applyCommits to drop results from a workspace the user already
+  // switched away from.
   const activeWsIdRef = useRef(wsId);
   useEffect(() => {
     activeWsIdRef.current = wsId;
   }, [wsId]);
 
-  // applyCommits commits a freshly-fetched commit list and prunes any saved
-  // comments whose commit hashes no longer appear in the new list. This keeps
-  // the workspace's stored comments in sync with reset --hard, branch
-  // switches, force-pushes, etc. The `wsForList` argument identifies which
-  // workspace the list belongs to — required because fetches issued under an
-  // old wsId may resolve after the user has switched workspaces.
+  // Applies a freshly-fetched commit list and prunes orphan comments. Skips
+  // pruning when the list is empty (could be transient fetch failure) or
+  // belongs to a workspace the user already switched away from.
   const applyCommits = useCallback((wsForList: string | null, list: Commit[]) => {
     setCommits(list);
-    // Guard: only prune when the list belongs to the *current* workspace and
-    // is non-empty. An empty list could legitimately mean "no commits in
-    // repo", but is indistinguishable from a transient fetch failure here;
-    // skipping the prune in that case is the safe fallback.
     if (wsForList !== activeWsIdRef.current) return;
     if (list.length === 0) return;
     const keep = new Set(list.map((c) => c.hash));
     const removed = pruneOrphanWorkspaceComments(wsForList, keep);
-    // If the user was viewing a commit that just disappeared from history,
-    // clear the selection so the diff view doesn't show stale data alongside
-    // newly-deleted comments.
     setSelectedCommit((prev) => (prev && !keep.has(prev) ? null : prev));
     if (removed > 0) {
       setCommitsWithComments(listCommitsWithComments(wsForList));
-      let n = 0;
-      for (const arr of loadAllWorkspaceThreads(wsForList).values()) n += arr.length;
-      setWsThreadCount(n);
       setToastMessage(`履歴に存在しないコミットのコメント${removed}件を削除しました`);
     }
   }, []);
