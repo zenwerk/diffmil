@@ -13,7 +13,7 @@ interface DiffChunkProps {
     extend: boolean,
   ) => void;
   renderLineExtra?: (line: DiffLine) => ReactNode;
-  rangeStateForLine?: (line: DiffLine) => "anchor" | "in-range" | null;
+  rangeStateForLine?: (line: DiffLine) => "anchor" | "in-range" | "committed" | null;
   hideAddButton?: boolean;
 }
 

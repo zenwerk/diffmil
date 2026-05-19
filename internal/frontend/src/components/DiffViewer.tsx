@@ -102,7 +102,11 @@ export function DiffViewer({
   const threadsByLine = useMemo(() => {
     const map = new Map<string, CommentThread[]>();
     for (const t of threads) {
-      const key = lineKey(t.side, t.line);
+      // Anchor the comment card at the end line of the range so multi-line
+      // threads render below the bottom of their selection (matches the
+      // form's position at save time).
+      const anchorLine = t.endLine ?? t.line;
+      const key = lineKey(t.side, anchorLine);
       const arr = map.get(key) ?? [];
       arr.push(t);
       map.set(key, arr);
@@ -169,16 +173,43 @@ export function DiffViewer({
     setPending({ side, line, endLine: line, anchorLine: line, formAt: line, content });
   };
 
+  // committedRangesBySide indexes saved threads for fast hit-testing when
+  // highlighting lines that belong to a committed comment. Single-line and
+  // multi-line threads are both indexed so the user can see at a glance which
+  // line(s) are commented on.
+  const committedRangesBySide = useMemo(() => {
+    const map: Record<DiffSide, Array<{ start: number; end: number }>> = {
+      old: [],
+      new: [],
+    };
+    for (const t of threads) {
+      const end = t.endLine ?? t.line;
+      map[t.side].push({ start: Math.min(t.line, end), end: Math.max(t.line, end) });
+    }
+    return map;
+  }, [threads]);
+
   const rangeStateFor = (
     targetSide: DiffSide,
     targetLine: number,
-  ): "anchor" | "in-range" | null => {
-    if (!pending || pending.side !== targetSide) return null;
-    if (targetLine < pending.line || targetLine > pending.endLine) return null;
-    return targetLine === pending.anchorLine ? "anchor" : "in-range";
+  ): "anchor" | "in-range" | "committed" | null => {
+    // Active selection takes precedence so the user sees their in-progress
+    // range clearly while choosing endpoints.
+    if (pending && pending.side === targetSide) {
+      if (targetLine >= pending.line && targetLine <= pending.endLine) {
+        return targetLine === pending.anchorLine ? "anchor" : "in-range";
+      }
+    }
+    // Otherwise, fall back to any saved multi-line range that covers this line.
+    for (const r of committedRangesBySide[targetSide]) {
+      if (targetLine >= r.start && targetLine <= r.end) return "committed";
+    }
+    return null;
   };
 
-  const rangeStateForLineUnified = (line: DiffLine): "anchor" | "in-range" | null => {
+  const rangeStateForLineUnified = (
+    line: DiffLine,
+  ): "anchor" | "in-range" | "committed" | null => {
     const t = pickSideAndLine(line);
     if (!t) return null;
     return rangeStateFor(t.side, t.lineNumber);
@@ -187,7 +218,7 @@ export function DiffViewer({
   const rangeStateForSplit = (
     side: DiffSide,
     line: DiffLine,
-  ): "anchor" | "in-range" | null => {
+  ): "anchor" | "in-range" | "committed" | null => {
     const ln = side === "old" ? line.oldLineNumber : line.newLineNumber;
     if (ln == null) return null;
     return rangeStateFor(side, ln);

@@ -15,7 +15,10 @@ interface SplitDiffChunkProps {
     extend: boolean,
   ) => void;
   renderLineExtra?: (line: DiffLine, side: DiffSide) => ReactNode;
-  rangeStateFor?: (side: DiffSide, line: DiffLine) => "anchor" | "in-range" | null;
+  rangeStateFor?: (
+    side: DiffSide,
+    line: DiffLine,
+  ) => "anchor" | "in-range" | "committed" | null;
   hideAddButton?: boolean;
 }
 
@@ -96,7 +99,7 @@ function SplitCell({
     content: string,
     extend: boolean,
   ) => void;
-  rangeState?: "anchor" | "in-range" | null;
+  rangeState?: "anchor" | "in-range" | "committed" | null;
   hideAddButton?: boolean;
 }) {
   if (!cell) {
@@ -115,7 +118,9 @@ function SplitCell({
       ? "bg-blue-500/20"
       : rangeState === "in-range"
         ? "bg-blue-500/10"
-        : "";
+        : rangeState === "committed"
+          ? "bg-blue-500/10"
+          : "";
   const bg = rangeBg || baseBg;
   const lineNum =
     side === "old" ? line.oldLineNumber : line.newLineNumber;

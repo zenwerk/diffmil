@@ -15,7 +15,7 @@ interface DiffLineRowProps {
     content: string,
     extend: boolean,
   ) => void;
-  rangeState?: "anchor" | "in-range" | null;
+  rangeState?: "anchor" | "in-range" | "committed" | null;
   hideAddButton?: boolean;
 }
 
@@ -46,7 +46,9 @@ export function DiffLineRow({
       ? "bg-blue-500/20"
       : rangeState === "in-range"
         ? "bg-blue-500/10"
-        : "";
+        : rangeState === "committed"
+          ? "bg-blue-500/10"
+          : "";
 
   return (
     <tr className={`group ${rangeBg || (LINE_BG_HOVER[line.type] ?? "hover:bg-line-hover")}`}>
