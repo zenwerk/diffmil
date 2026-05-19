@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useComments, listCommitsWithComments } from "./useComments";
+import {
+  useComments,
+  listCommitsWithComments,
+  loadAllWorkspaceThreads,
+  clearAllWorkspaceComments,
+  pruneOrphanWorkspaceComments,
+} from "./useComments";
 import type { CommentThread } from "../types";
 
 function makeThread(overrides: Partial<CommentThread> = {}): CommentThread {
@@ -81,6 +87,16 @@ describe("useComments", () => {
     const id = result.current.threads[0].id;
     act(() => result.current.removeThread(id));
     expect(result.current.threads).toHaveLength(0);
+  });
+
+  it("clearAll empties threads for the active commit and persists empty array", () => {
+    const { result } = renderHook(() => useComments("ws1", "h"));
+    addOne(result, "a");
+    addOne(result, "b", { line: 2 });
+    expect(result.current.threads).toHaveLength(2);
+    act(() => result.current.clearAll());
+    expect(result.current.threads).toHaveLength(0);
+    expect(localStorage.getItem("diffmil.comments.ws1.h")).toBe("[]");
   });
 
   it("rejects invalid threads from localStorage", () => {
@@ -169,5 +185,120 @@ describe("listCommitsWithComments", () => {
       JSON.stringify([makeThread({ commitHash: "commit-a" })]),
     );
     expect([...listCommitsWithComments(null)]).toEqual(["legacy-hash"]);
+  });
+});
+
+describe("loadAllWorkspaceThreads", () => {
+  it("returns valid threads grouped by commit hash within the workspace", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-a",
+      JSON.stringify([makeThread({ id: "a1", commitHash: "commit-a" })]),
+    );
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-b",
+      JSON.stringify([
+        makeThread({ id: "b1", commitHash: "commit-b" }),
+        makeThread({ id: "b2", commitHash: "commit-b", line: 2 }),
+      ]),
+    );
+    // Other workspace must not leak.
+    localStorage.setItem(
+      "diffmil.comments.ws2.commit-c",
+      JSON.stringify([makeThread({ id: "c1", commitHash: "commit-c" })]),
+    );
+    const out = loadAllWorkspaceThreads("ws1");
+    expect([...out.keys()].sort()).toEqual(["commit-a", "commit-b"]);
+    expect(out.get("commit-a")).toHaveLength(1);
+    expect(out.get("commit-b")).toHaveLength(2);
+  });
+
+  it("skips keys whose payload has no valid threads", () => {
+    localStorage.setItem("diffmil.comments.ws1.commit-empty", JSON.stringify([]));
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-bad",
+      JSON.stringify([{ broken: true }]),
+    );
+    const out = loadAllWorkspaceThreads("ws1");
+    expect(out.size).toBe(0);
+  });
+});
+
+describe("pruneOrphanWorkspaceComments", () => {
+  it("removes entries whose commit hash is absent from keepHashes", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-keep",
+      JSON.stringify([makeThread({ id: "k", commitHash: "commit-keep" })]),
+    );
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-gone",
+      JSON.stringify([
+        makeThread({ id: "g1", commitHash: "commit-gone" }),
+        makeThread({ id: "g2", commitHash: "commit-gone", line: 2 }),
+      ]),
+    );
+    const removed = pruneOrphanWorkspaceComments(
+      "ws1",
+      new Set(["commit-keep"]),
+    );
+    expect(removed).toBe(2);
+    expect(localStorage.getItem("diffmil.comments.ws1.commit-keep")).not.toBeNull();
+    expect(localStorage.getItem("diffmil.comments.ws1.commit-gone")).toBeNull();
+  });
+
+  it("never touches keys from other workspaces", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-gone",
+      JSON.stringify([makeThread({ id: "g1", commitHash: "commit-gone" })]),
+    );
+    localStorage.setItem(
+      "diffmil.comments.ws2.commit-gone",
+      JSON.stringify([makeThread({ id: "g2", commitHash: "commit-gone" })]),
+    );
+    pruneOrphanWorkspaceComments("ws1", new Set());
+    expect(localStorage.getItem("diffmil.comments.ws1.commit-gone")).toBeNull();
+    expect(localStorage.getItem("diffmil.comments.ws2.commit-gone")).not.toBeNull();
+  });
+
+  it("returns 0 when nothing is orphaned", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-a",
+      JSON.stringify([makeThread({ id: "a", commitHash: "commit-a" })]),
+    );
+    const removed = pruneOrphanWorkspaceComments(
+      "ws1",
+      new Set(["commit-a", "commit-x"]),
+    );
+    expect(removed).toBe(0);
+    expect(localStorage.getItem("diffmil.comments.ws1.commit-a")).not.toBeNull();
+  });
+});
+
+describe("clearAllWorkspaceComments", () => {
+  it("removes every workspace-scoped key and returns thread count", () => {
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-a",
+      JSON.stringify([
+        makeThread({ id: "a1", commitHash: "commit-a" }),
+        makeThread({ id: "a2", commitHash: "commit-a", line: 2 }),
+      ]),
+    );
+    localStorage.setItem(
+      "diffmil.comments.ws1.commit-b",
+      JSON.stringify([makeThread({ id: "b1", commitHash: "commit-b" })]),
+    );
+    // Other workspace must survive.
+    localStorage.setItem(
+      "diffmil.comments.ws2.commit-c",
+      JSON.stringify([makeThread({ id: "c1", commitHash: "commit-c" })]),
+    );
+    const removed = clearAllWorkspaceComments("ws1");
+    expect(removed).toBe(3);
+    expect(localStorage.getItem("diffmil.comments.ws1.commit-a")).toBeNull();
+    expect(localStorage.getItem("diffmil.comments.ws1.commit-b")).toBeNull();
+    expect(localStorage.getItem("diffmil.comments.ws2.commit-c")).not.toBeNull();
+  });
+
+  it("returns 0 when there is nothing to clear", () => {
+    expect(clearAllWorkspaceComments("ws-empty")).toBe(0);
   });
 });

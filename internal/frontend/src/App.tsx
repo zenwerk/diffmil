@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { PanelLeft, PanelRight, FoldVertical, UnfoldVertical, ClipboardCopy } from "lucide-react";
+import {
+  PanelLeft,
+  PanelRight,
+  FoldVertical,
+  UnfoldVertical,
+  ClipboardCopy,
+  ClipboardList,
+  Trash2,
+} from "lucide-react";
 import type { CommentThread, DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
@@ -15,7 +23,13 @@ import { useTheme, ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
-import { useComments, listCommitsWithComments } from "./hooks/useComments";
+import {
+  useComments,
+  listCommitsWithComments,
+  loadAllWorkspaceThreads,
+  clearAllWorkspaceComments,
+  pruneOrphanWorkspaceComments,
+} from "./hooks/useComments";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { copyToClipboard, formatAllThreadsPrompt, toCommitContext } from "./utils/commentPrompt";
@@ -99,13 +113,33 @@ function AppContent() {
     setCollapsedFiles(new Set());
   }, []);
 
-  const { threads, addThread, updateMessage, removeThread } = useComments(wsId, selectedCommit);
+  const { threads, addThread, updateMessage, removeThread, clearAll } = useComments(wsId, selectedCommit);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [confirmClearWs, setConfirmClearWs] = useState(false);
+  // Reset the "are you sure" confirmation states whenever the commit or
+  // workspace switches so they don't bleed across contexts.
+  useEffect(() => {
+    setConfirmClearAll(false);
+  }, [selectedCommit, wsId]);
+  useEffect(() => {
+    setConfirmClearWs(false);
+  }, [wsId]);
 
   const [commitsWithComments, setCommitsWithComments] = useState<Set<string>>(() =>
     listCommitsWithComments(wsId),
   );
+  // wsThreadCount is the total number of comments across every commit in the
+  // current workspace — drives the workspace-wide copy/clear buttons.
+  const [wsThreadCount, setWsThreadCount] = useState<number>(() => {
+    let n = 0;
+    for (const arr of loadAllWorkspaceThreads(wsId).values()) n += arr.length;
+    return n;
+  });
   useEffect(() => {
     setCommitsWithComments(listCommitsWithComments(wsId));
+    let n = 0;
+    for (const arr of loadAllWorkspaceThreads(wsId).values()) n += arr.length;
+    setWsThreadCount(n);
   }, [threads, selectedCommit, wsId]);
 
   const threadsByFile = useMemo(() => {
@@ -132,6 +166,61 @@ function AppContent() {
     },
     [threads],
   );
+
+  // commitsRef lets the workspace-wide copy handler resolve commit metadata
+  // (subject/author/date) without re-binding when only `commits` changes.
+  const commitsRef = useRef(commits);
+  useEffect(() => {
+    commitsRef.current = commits;
+  }, [commits]);
+
+  const handleCopyWorkspacePrompts = useCallback(async () => {
+    const byCommit = loadAllWorkspaceThreads(wsId);
+    if (byCommit.size === 0) return;
+    // Group threads under their commit context so the LLM sees which commit
+    // each block of comments belongs to. Commits are emitted in the order
+    // they appear in the current commit list (newest first); any orphans
+    // (comments on commits no longer in the list) trail at the end.
+    const knownOrder = new Map<string, number>();
+    commitsRef.current.forEach((c, i) => knownOrder.set(c.hash, i));
+    const orderedHashes = Array.from(byCommit.keys()).sort((a, b) => {
+      const ai = knownOrder.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const bi = knownOrder.get(b) ?? Number.MAX_SAFE_INTEGER;
+      if (ai !== bi) return ai - bi;
+      return a.localeCompare(b);
+    });
+
+    const blocks: string[] = [];
+    let totalThreads = 0;
+    for (const hash of orderedHashes) {
+      const arr = byCommit.get(hash) ?? [];
+      if (arr.length === 0) continue;
+      const commit = commitsRef.current.find((c) => c.hash === hash) ?? null;
+      const ctx = toCommitContext(commit, hash);
+      blocks.push(formatAllThreadsPrompt(arr, ctx));
+      totalThreads += arr.length;
+    }
+    if (totalThreads === 0) return;
+    const ok = await copyToClipboard(blocks.join("\n=====\n"));
+    if (ok) {
+      setToastMessage(
+        `${totalThreads}件のコメント (${orderedHashes.length}コミット) をコピーしました`,
+      );
+    }
+  }, [wsId]);
+
+  const handleClearWorkspaceComments = useCallback(() => {
+    const removed = clearAllWorkspaceComments(wsId);
+    setCommitsWithComments(listCommitsWithComments(wsId));
+    setWsThreadCount(0);
+    // The hook owning the currently-loaded threads is keyed on (wsId,
+    // selectedCommit); force it to re-read from now-empty storage by toggling
+    // the commit selection if applicable. Simpler: clear the local visible
+    // threads via the hook's own clearAll, which handles the active commit.
+    clearAll();
+    setConfirmClearWs(false);
+    setToastMessage(`${removed}件のコメントを削除しました`);
+  }, [wsId, clearAll]);
 
   useEffect(() => {
     const auto = new Set<string>();
@@ -269,6 +358,42 @@ function AppContent() {
     [wsParam],
   );
 
+  // Latest active workspace ID kept in a ref so that async callbacks resolving
+  // after a workspace switch can detect "this result is stale".
+  const activeWsIdRef = useRef(wsId);
+  useEffect(() => {
+    activeWsIdRef.current = wsId;
+  }, [wsId]);
+
+  // applyCommits commits a freshly-fetched commit list and prunes any saved
+  // comments whose commit hashes no longer appear in the new list. This keeps
+  // the workspace's stored comments in sync with reset --hard, branch
+  // switches, force-pushes, etc. The `wsForList` argument identifies which
+  // workspace the list belongs to — required because fetches issued under an
+  // old wsId may resolve after the user has switched workspaces.
+  const applyCommits = useCallback((wsForList: string | null, list: Commit[]) => {
+    setCommits(list);
+    // Guard: only prune when the list belongs to the *current* workspace and
+    // is non-empty. An empty list could legitimately mean "no commits in
+    // repo", but is indistinguishable from a transient fetch failure here;
+    // skipping the prune in that case is the safe fallback.
+    if (wsForList !== activeWsIdRef.current) return;
+    if (list.length === 0) return;
+    const keep = new Set(list.map((c) => c.hash));
+    const removed = pruneOrphanWorkspaceComments(wsForList, keep);
+    // If the user was viewing a commit that just disappeared from history,
+    // clear the selection so the diff view doesn't show stale data alongside
+    // newly-deleted comments.
+    setSelectedCommit((prev) => (prev && !keep.has(prev) ? null : prev));
+    if (removed > 0) {
+      setCommitsWithComments(listCommitsWithComments(wsForList));
+      let n = 0;
+      for (const arr of loadAllWorkspaceThreads(wsForList).values()) n += arr.length;
+      setWsThreadCount(n);
+      setToastMessage(`履歴に存在しないコミットのコメント${removed}件を削除しました`);
+    }
+  }, []);
+
   const dismissToast = useCallback(() => setToastMessage(null), []);
 
   useEffect(() => {
@@ -284,7 +409,7 @@ function AppContent() {
     ])
       .then(([diff, commitList]) => {
         setDiffData(diff);
-        setCommits(commitList);
+        applyCommits(wsId, commitList);
         setSelectedCommit(null);
         setLoading(false);
       })
@@ -292,7 +417,7 @@ function AppContent() {
         setError(err.message);
         setLoading(false);
       });
-  }, [fetchCommits, wsParam, wsId, workspaces.length]);
+  }, [fetchCommits, wsParam, wsId, workspaces.length, applyCommits]);
 
   // Refs so the long-lived SSE listener always sees the current active workspace
   // without forcing the EventSource to reconnect on every workspace switch.
@@ -336,8 +461,9 @@ function AppContent() {
 
     es.addEventListener("commits-changed", (e) => {
       if (!isRelevant((e as MessageEvent).data)) return;
+      const wsAtFetch = wsIdSseRef.current;
       fetchCommitsRef.current().then((commitList) => {
-        setCommits(commitList);
+        applyCommits(wsAtFetch, commitList);
         setToastMessage("New commits detected");
       });
     });
@@ -349,7 +475,7 @@ function AppContent() {
     es.onerror = () => {};
 
     return () => es.close();
-  }, [refreshWorkspaces]);
+  }, [refreshWorkspaces, applyCommits]);
 
   const handleSelectCommit = useCallback(
     (hash: string) => {
@@ -441,14 +567,87 @@ function AppContent() {
         )}
         <div className="ml-auto flex items-center gap-2 shrink-0">
           {threads.length > 0 && (
-            <button
-              onClick={() => handleCopyAllPrompts(commitContext)}
-              title={`全コメント(${threads.length}件)をプロンプト形式でコピー`}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors"
-            >
-              <ClipboardCopy size={14} />
-              <span className="font-mono">{threads.length}</span>
-            </button>
+            <>
+              <button
+                onClick={() => handleCopyAllPrompts(commitContext)}
+                title={`このコミットの全コメント(${threads.length}件)をプロンプト形式でコピー`}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors"
+              >
+                <ClipboardCopy size={14} />
+                <span className="font-mono">{threads.length}</span>
+              </button>
+              {confirmClearAll ? (
+                <span className="flex items-center gap-1 text-xs">
+                  <span className="text-gh-warning">
+                    このコミットの{threads.length}件を削除？
+                  </span>
+                  <button
+                    onClick={() => {
+                      clearAll();
+                      setConfirmClearAll(false);
+                      setToastMessage(`${threads.length}件のコメントを削除しました`);
+                    }}
+                    className="px-2 py-1 rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                  >
+                    削除
+                  </button>
+                  <button
+                    onClick={() => setConfirmClearAll(false)}
+                    className="px-2 py-1 rounded text-gh-text-secondary hover:bg-gh-bg-tertiary transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmClearAll(true)}
+                  title={`このコミットの全コメント(${threads.length}件)を削除`}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-xs text-gh-text-muted border border-gh-border hover:text-red-400 hover:border-red-500/40 hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </>
+          )}
+          {wsThreadCount > 0 && (
+            <>
+              <span className="h-4 w-px bg-gh-border" aria-hidden />
+              <button
+                onClick={() => void handleCopyWorkspacePrompts()}
+                title={`ワークスペース全体の全コメント(${wsThreadCount}件)をプロンプト形式でコピー`}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors"
+              >
+                <ClipboardList size={14} />
+                <span className="font-mono">{wsThreadCount}</span>
+              </button>
+              {confirmClearWs ? (
+                <span className="flex items-center gap-1 text-xs">
+                  <span className="text-gh-warning">
+                    ワークスペース全体の{wsThreadCount}件を削除？
+                  </span>
+                  <button
+                    onClick={handleClearWorkspaceComments}
+                    className="px-2 py-1 rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                  >
+                    削除
+                  </button>
+                  <button
+                    onClick={() => setConfirmClearWs(false)}
+                    className="px-2 py-1 rounded text-gh-text-secondary hover:bg-gh-bg-tertiary transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmClearWs(true)}
+                  title={`ワークスペース全体の全コメント(${wsThreadCount}件)を削除`}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-xs text-gh-text-muted border border-gh-border hover:text-red-400 hover:border-red-500/40 hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </>
           )}
           {files.length > 0 && (
             <>
