@@ -54,14 +54,14 @@ Notes:
   the server without knowing your IP. Access via http://<mdns-host>.local:<port>.
   Ports below 1024 (e.g. 80) are privileged and require root, so to drop the
   ":port" suffix you must run diffmil with sudo. For everyday use, the default
-  http://difmil.local:8080 is recommended.
+  http://difmil.local:8765 is recommended.
 
 Options:
 `)
 		flag.PrintDefaults()
 	}
 
-	port := flag.Int("port", 8080, "server port")
+	port := flag.Int("port", 8765, "server port")
 	noOpen := flag.Bool("no-open", false, "don't open browser")
 	foreground := flag.Bool("foreground", false, "run server in foreground (don't daemonize)")
 	doStatus := flag.Bool("status", false, "show status of running server(s)")

@@ -11,7 +11,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/_/": "http://localhost:8080",
+      "/_/": "http://localhost:8765",
     },
   },
   test: {
