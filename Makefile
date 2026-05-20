@@ -4,7 +4,7 @@ generate:
 	go generate ./internal/static/
 
 build: generate
-	go build -trimpath -o diffmil .
+	go build -trimpath -ldflags="-s -w" -o diffmil .
 
 dev: build
 	./diffmil $(ARGS)
