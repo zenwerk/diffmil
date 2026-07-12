@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ThemedToken } from "shiki";
 import type {
@@ -18,6 +18,10 @@ import type { RangeState } from "../constants/diff";
 import { isAutoFoldPath } from "../constants/autoFold";
 import type { CommitContext } from "../utils/commentPrompt";
 import { collectRangeSnapshot, pickSideAndLine } from "../utils/diffLine";
+import { buildExpandedLines, computeGaps } from "../utils/expandGap";
+import { fetchBlobLines } from "../utils/blobLines";
+
+const EXPAND_STEP = 20;
 
 interface DiffViewerProps {
   file: DiffFile;
@@ -27,6 +31,7 @@ interface DiffViewerProps {
   onToggleCollapsed: () => void;
   threads: CommentThread[];
   commitContext?: CommitContext;
+  workspaceId?: string;
   onAddComment: (params: {
     filePath: string;
     side: DiffSide;
@@ -38,6 +43,16 @@ interface DiffViewerProps {
   onUpdateComment: (threadId: string, messageId: string, body: string) => void;
   onRemoveComment: (threadId: string) => void;
   onCommentCopied?: () => void;
+}
+
+// ExpandedRange represents the context lines already fetched for the gap
+// immediately above a given chunk. Both sides advance in lock-step because
+// expanded regions are unchanged context. The stored line numbers point at the
+// first line of `lines`; the remaining numbers are derived by offset.
+interface ExpandedRange {
+  newStart: number;
+  oldStart: number;
+  lines: string[];
 }
 
 interface PendingForm {
@@ -68,6 +83,7 @@ export function DiffViewer({
   onToggleCollapsed,
   threads,
   commitContext,
+  workspaceId,
   onAddComment,
   onUpdateComment,
   onRemoveComment,
@@ -76,6 +92,156 @@ export function DiffViewer({
   const meta = STATUS_META[file.status] ?? STATUS_META.modified;
   const autoFold = isAutoFoldPath(file.path);
   const { ready, highlightLines } = useHighlighter();
+
+  // The diff table lives inside a horizontally-scrolling container. Comment
+  // forms are rendered in full-width rows inside that table, so when a long
+  // code line widens the table beyond the viewport the form (and its save
+  // button) gets pushed off-screen to the right. We measure the *visible*
+  // width of the scroll container and pin the form contents to it with
+  // `sticky left-0`, so the form stays within view regardless of scroll.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [viewportWidth, setViewportWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setViewportWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [collapsed, file.isBinary]);
+
+  // Per-gap expansion state. Keyed by `beforeChunkIndex` (the index of the
+  // chunk this gap precedes, or chunks.length for the trailing gap).
+  const [expanded, setExpanded] = useState<Map<number, ExpandedRange>>(new Map());
+  // totalNewLines is needed to know how far the trailing gap extends. We
+  // populate it lazily on the first attempt to expand the trailing gap.
+  const [totalNewLines, setTotalNewLines] = useState<number | undefined>();
+  // Reset expansion when the underlying file (commit / path) changes.
+  useEffect(() => {
+    setExpanded(new Map());
+    setTotalNewLines(undefined);
+  }, [file.path, commitContext?.hash]);
+
+  const gaps = useMemo(
+    () => computeGaps(file, totalNewLines),
+    [file, totalNewLines],
+  );
+
+  // canExpand is the gating predicate for showing expander UI at all. Without
+  // a workspace context we cannot fetch blob lines, so the whole feature is
+  // hidden for stdin-supplied diffs that aren't associated with any workspace.
+  const canExpand = Boolean(workspaceId) && !file.isBinary && file.status !== "added" && file.status !== "deleted";
+
+  // loadGap fetches more context for the gap immediately above `chunkIndex`.
+  // Expanded lines always stack directly above the chunk header (matching
+  // GitHub). The `direction` only affects *which* portion of the still-hidden
+  // range to pull next:
+  //   - "up":   take `step` lines closest to the chunk (so existing context
+  //             grows further away). This is the default header click.
+  //   - "down": take `step` lines from the top of the gap (closer to the
+  //             previous hunk / file start), useful when the user wants to
+  //             see the upper end of the gap first.
+  //   - "all":  pull the entire remaining gap.
+  const loadGap = async (
+    chunkIndex: number,
+    direction: "up" | "down" | "all",
+  ) => {
+    const gap = gaps.find((g) => g.beforeChunkIndex === chunkIndex);
+    if (!gap) return;
+    const existing = expanded.get(chunkIndex);
+
+    // The still-hidden range is the gap minus any already-fetched portion.
+    // Stored lines occupy [existing.newStart, existing.newStart + len - 1].
+    let hiddenNewStart = gap.newStart;
+    let hiddenNewEnd = gap.newEnd;
+    let hiddenOldStart = gap.oldStart;
+    let hiddenOldEnd = gap.oldEnd;
+    if (existing) {
+      // Already-fetched lines sit just above the chunk header, so they
+      // consume the *bottom* of the gap. Reduce the hidden range from below.
+      hiddenNewEnd = existing.newStart - 1;
+      hiddenOldEnd = existing.oldStart - 1;
+    }
+    if (hiddenNewEnd < hiddenNewStart) return;
+
+    let reqNewStart: number;
+    let reqNewEnd: number;
+    let reqOldStart: number;
+
+    if (direction === "all") {
+      reqNewStart = hiddenNewStart;
+      reqNewEnd = hiddenNewEnd;
+      reqOldStart = hiddenOldStart;
+    } else if (direction === "up") {
+      // Bottom of the hidden range (closest to the chunk header).
+      reqNewEnd = hiddenNewEnd;
+      reqNewStart = Math.max(hiddenNewStart, hiddenNewEnd - EXPAND_STEP + 1);
+      reqOldStart = Math.max(hiddenOldStart, hiddenOldEnd - EXPAND_STEP + 1);
+    } else {
+      // Top of the hidden range (closest to the previous hunk / file start).
+      reqNewStart = hiddenNewStart;
+      reqNewEnd = Math.min(hiddenNewEnd, hiddenNewStart + EXPAND_STEP - 1);
+      reqOldStart = hiddenOldStart;
+    }
+    if (reqNewEnd < reqNewStart) return;
+
+    const res = await fetchBlobLines({
+      workspaceId,
+      commit: commitContext?.hash,
+      path: file.path,
+      side: "new",
+      start: reqNewStart,
+      end: reqNewEnd,
+    });
+    if (!res || res.lines.length === 0) return;
+    if (totalNewLines == null) setTotalNewLines(res.totalLines);
+
+    setExpanded((prev) => {
+      const next = new Map(prev);
+      const prior = next.get(chunkIndex);
+      if (!prior) {
+        next.set(chunkIndex, {
+          newStart: reqNewStart,
+          oldStart: reqOldStart,
+          lines: res.lines,
+        });
+        return next;
+      }
+      // Merge by ordering on line numbers: fetched lines may sit above or
+      // below the existing block depending on direction.
+      const fetchedStart = reqNewStart;
+      const fetchedEnd = reqNewStart + res.lines.length - 1;
+      const priorEnd = prior.newStart + prior.lines.length - 1;
+      if (fetchedEnd + 1 === prior.newStart) {
+        // Fetched chunk sits directly above existing block: prepend.
+        next.set(chunkIndex, {
+          newStart: fetchedStart,
+          oldStart: reqOldStart,
+          lines: [...res.lines, ...prior.lines],
+        });
+      } else if (priorEnd + 1 === fetchedStart) {
+        // Fetched chunk sits directly below existing block: append.
+        next.set(chunkIndex, {
+          ...prior,
+          lines: [...prior.lines, ...res.lines],
+        });
+      } else {
+        // Non-contiguous (gap between fetched and existing) — keep the newest
+        // fetch alone. In practice this only happens if the user clicked
+        // "down" with a non-empty hidden range above, then "up" again; the
+        // simpler behavior is to replace so the visible block stays a single
+        // contiguous range above the chunk.
+        next.set(chunkIndex, {
+          newStart: fetchedStart,
+          oldStart: reqOldStart,
+          lines: res.lines,
+        });
+      }
+      return next;
+    });
+  };
+
   const [pending, setPending] = useState<PendingForm | null>(null);
   // shiftHeld drives row-level UI changes while the user holds Shift: the
   // per-line "add comment" button is hidden so it doesn't block clicks on the
@@ -114,34 +280,78 @@ export function DiffViewer({
     return map;
   }, [threads]);
 
+  // Tokens are computed as two separate documents: one for the old-side text
+  // (unchanged + deleted lines) and one for the new-side text (unchanged +
+  // added lines). A unified diff interleaves lines from two different file
+  // versions, so concatenating all of them naively can pair up delimiters
+  // (e.g. a raw string's opening backtick on a deleted line with an
+  // unrelated backtick on an added line) that were never adjacent in either
+  // real file — corrupting the highlight state for everything after. Each
+  // chunk line pulls its tokens from whichever document it actually belongs
+  // to. The result is split back per-chunk ({ expandedAbove, lines }) to
+  // feed DiffChunk / SplitDiffChunk.
   const allLineTokens = useMemo(() => {
     if (collapsed) return null;
     if (!ready || file.chunks.length === 0) return null;
 
     const lang = detectLanguage(file.path);
-    const allLines: string[] = [];
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    // Track segment sizes so we can slice tokens back into per-chunk pairs.
+    const segments: {
+      expandedLen: number;
+      chunkLineSides: ("old" | "new")[];
+    }[] = [];
 
-    for (const chunk of file.chunks) {
+    for (let i = 0; i < file.chunks.length; i++) {
+      const chunk = file.chunks[i];
+      const ex = expanded.get(i);
+      const expandedLen = ex?.lines.length ?? 0;
+      if (ex) {
+        // Expanded context is unchanged, so it only needs to live in one
+        // document; old is used arbitrarily.
+        for (const content of ex.lines) oldLines.push(content);
+      }
+      const chunkLineSides: ("old" | "new")[] = [];
       for (const line of chunk.lines) {
-        allLines.push(line.content);
+        if (line.type === "add") {
+          chunkLineSides.push("new");
+          newLines.push(line.content);
+        } else {
+          // "normal" lines are identical text on both sides; old is used
+          // arbitrarily since either document's tokens are equivalent.
+          chunkLineSides.push("old");
+          oldLines.push(line.content);
+        }
       }
+      segments.push({ expandedLen, chunkLineSides });
     }
 
-    const tokens = highlightLines(allLines, lang, shikiTheme);
-    if (tokens.length === 0) return null;
+    const oldTokens = highlightLines(oldLines, lang, shikiTheme);
+    const newTokens = highlightLines(newLines, lang, shikiTheme);
+    if (oldTokens.length === 0 && newTokens.length === 0) return null;
 
-    const result: (ThemedToken[] | undefined)[][] = [];
-    let idx = 0;
-    for (const chunk of file.chunks) {
-      const chunkTokens: (ThemedToken[] | undefined)[] = [];
-      for (let i = 0; i < chunk.lines.length; i++) {
-        chunkTokens.push(tokens[idx]);
-        idx++;
+    let oldIdx = 0;
+    let newIdx = 0;
+    return segments.map(({ expandedLen, chunkLineSides }) => {
+      const expandedTokens: (ThemedToken[] | undefined)[] = [];
+      for (let i = 0; i < expandedLen; i++) {
+        expandedTokens.push(oldTokens[oldIdx]);
+        oldIdx++;
       }
-      result.push(chunkTokens);
-    }
-    return result;
-  }, [ready, file, shikiTheme, highlightLines, collapsed]);
+      const lineTokens: (ThemedToken[] | undefined)[] = [];
+      for (const side of chunkLineSides) {
+        if (side === "new") {
+          lineTokens.push(newTokens[newIdx]);
+          newIdx++;
+        } else {
+          lineTokens.push(oldTokens[oldIdx]);
+          oldIdx++;
+        }
+      }
+      return { expandedAbove: expandedTokens, lines: lineTokens };
+    });
+  }, [ready, file, shikiTheme, highlightLines, collapsed, expanded]);
 
   const handleAddComment = (
     side: DiffSide,
@@ -220,7 +430,10 @@ export function DiffViewer({
     const showForm = pending?.side === targetSide && pending.formAt === targetLine;
     if (lineThreads.length === 0 && !showForm) return null;
     return (
-      <div className="flex flex-col gap-2">
+      <div
+        className="flex flex-col gap-2 sticky left-0"
+        style={viewportWidth != null ? { width: viewportWidth } : undefined}
+      >
         {lineThreads.map((t) => (
           <CommentCard
             key={t.id}
@@ -321,7 +534,7 @@ export function DiffViewer({
           No changes
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={scrollRef}>
           <table
             className={`border-collapse ${viewMode === "split" ? "w-full table-fixed" : "w-full"}`}
           >
@@ -334,29 +547,84 @@ export function DiffViewer({
               </colgroup>
             )}
             <tbody>
-              {file.chunks.map((chunk, i) =>
-                viewMode === "split" ? (
-                  <SplitDiffChunk
-                    key={i}
-                    chunk={chunk}
-                    lineTokens={allLineTokens?.[i]}
-                    onAddComment={handleAddComment}
-                    renderLineExtra={renderSplitExtra}
-                    rangeStateFor={rangeStateForSplit}
-                    hideAddButton={shiftHeld}
-                  />
-                ) : (
+              {file.chunks.map((chunk, i) => {
+                const gap = gaps.find((g) => g.beforeChunkIndex === i);
+                const ex = expanded.get(i);
+                const hasGap = canExpand && Boolean(gap);
+                const expandedSoFar = ex?.lines.length ?? 0;
+                const gapTotal = gap
+                  ? Math.max(gap.newEnd - gap.newStart + 1, gap.oldEnd - gap.oldStart + 1)
+                  : 0;
+                const remaining = gapTotal - expandedSoFar;
+                // Up-direction expansion is impossible when no gap above the
+                // chunk (= first chunk starts at line 1). Down stays available
+                // whenever there's still hidden context.
+                const canUp = hasGap && remaining > 0;
+                const canDown = hasGap && remaining > 0;
+                // Hide the `@@ ... @@` header whenever the line numbers above
+                // and below it are already contiguous — the header would just
+                // be visual noise between adjacent line numbers. The "row above
+                // the header" is the previous hunk's last line (or 0 before
+                // the first hunk); the "row below" is the first visible line
+                // of this hunk, which is the start of any expanded prefix when
+                // present, otherwise the hunk's own oldStart/newStart.
+                const prevChunk = i > 0 ? file.chunks[i - 1] : null;
+                const prevOldEnd = prevChunk
+                  ? prevChunk.oldStart + prevChunk.oldLines - 1
+                  : 0;
+                const prevNewEnd = prevChunk
+                  ? prevChunk.newStart + prevChunk.newLines - 1
+                  : 0;
+                const displayOldStart = ex ? ex.oldStart : chunk.oldStart;
+                const displayNewStart = ex ? ex.newStart : chunk.newStart;
+                const hideHeader =
+                  displayOldStart === prevOldEnd + 1 &&
+                  displayNewStart === prevNewEnd + 1;
+                const expandedLines = ex
+                  ? buildExpandedLines(ex.lines, ex.oldStart, ex.newStart)
+                  : undefined;
+                const segTokens = allLineTokens?.[i];
+                if (viewMode === "split") {
+                  return (
+                    <SplitDiffChunk
+                      key={`chunk-${i}`}
+                      chunk={chunk}
+                      lineTokens={segTokens?.lines}
+                      onAddComment={handleAddComment}
+                      renderLineExtra={renderSplitExtra}
+                      rangeStateFor={rangeStateForSplit}
+                      hideAddButton={shiftHeld}
+                      expandedAbove={expandedLines}
+                      expandedAboveTokens={segTokens?.expandedAbove}
+                      onExpandUp={canUp ? () => void loadGap(i, "up") : undefined}
+                      onExpandDown={canDown ? () => void loadGap(i, "down") : undefined}
+                      onExpandAll={hasGap && remaining > 0 ? () => void loadGap(i, "all") : undefined}
+                      canExpandUp={canUp}
+                      canExpandDown={canDown}
+                      hideHeader={hideHeader}
+                    />
+                  );
+                }
+                return (
                   <DiffChunk
-                    key={i}
+                    key={`chunk-${i}`}
                     chunk={chunk}
-                    lineTokens={allLineTokens?.[i]}
+                    lineTokens={segTokens?.lines}
                     onAddComment={handleAddComment}
                     renderLineExtra={renderUnifiedExtra}
                     rangeStateForLine={rangeStateForLineUnified}
                     hideAddButton={shiftHeld}
+                    expandedAbove={expandedLines}
+                    expandedAboveTokens={segTokens?.expandedAbove}
+                    onExpandUp={canUp ? () => void loadGap(i, "up") : undefined}
+                    onExpandDown={canDown ? () => void loadGap(i, "down") : undefined}
+                    onExpandAll={hasGap && remaining > 0 ? () => void loadGap(i, "all") : undefined}
+                    canExpandUp={canUp}
+                    canExpandDown={canDown}
+                    hideHeader={hideHeader}
                   />
-                ),
-              )}
+                );
+              })}
             </tbody>
           </table>
         </div>
