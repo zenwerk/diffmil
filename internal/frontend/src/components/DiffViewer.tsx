@@ -280,38 +280,35 @@ export function DiffViewer({
     return map;
   }, [threads]);
 
-  // Tokens are computed as two separate documents: one for the old-side text
-  // (unchanged + deleted lines) and one for the new-side text (unchanged +
-  // added lines). A unified diff interleaves lines from two different file
-  // versions, so concatenating all of them naively can pair up delimiters
-  // (e.g. a raw string's opening backtick on a deleted line with an
-  // unrelated backtick on an added line) that were never adjacent in either
-  // real file — corrupting the highlight state for everything after. Each
-  // chunk line pulls its tokens from whichever document it actually belongs
-  // to. The result is split back per-chunk ({ expandedAbove, lines }) to
-  // feed DiffChunk / SplitDiffChunk.
+  // Tokens are computed per chunk, and within a chunk as two separate
+  // documents: one for the old-side text (unchanged + deleted lines, plus
+  // any expander-fetched context) and one for the new-side text (unchanged +
+  // added lines). Two correctness constraints drive this:
+  //
+  // 1. A unified diff interleaves lines from two different file versions, so
+  //    concatenating add/delete lines naively can pair up delimiters (e.g. a
+  //    raw string's opening backtick on a deleted line with an unrelated
+  //    backtick on an added line) that were never adjacent in either real
+  //    file — corrupting the highlight state for everything after.
+  // 2. Hunks omit the unchanged lines between them. Concatenating text
+  //    across chunk boundaries silently drops that omitted text, so a
+  //    multi-line construct (like a raw string) that opens in one chunk and
+  //    closes in another gets tokenized with a chunk of its middle missing —
+  //    also corrupting highlight state. So each chunk (plus its own expanded
+  //    context, which is contiguous with it) is tokenized independently;
+  //    state is never shared across chunks.
   const allLineTokens = useMemo(() => {
     if (collapsed) return null;
     if (!ready || file.chunks.length === 0) return null;
 
     const lang = detectLanguage(file.path);
-    const oldLines: string[] = [];
-    const newLines: string[] = [];
-    // Track segment sizes so we can slice tokens back into per-chunk pairs.
-    const segments: {
-      expandedLen: number;
-      chunkLineSides: ("old" | "new")[];
-    }[] = [];
+    let anyTokens = false;
 
-    for (let i = 0; i < file.chunks.length; i++) {
-      const chunk = file.chunks[i];
+    const result = file.chunks.map((chunk, i) => {
       const ex = expanded.get(i);
       const expandedLen = ex?.lines.length ?? 0;
-      if (ex) {
-        // Expanded context is unchanged, so it only needs to live in one
-        // document; old is used arbitrarily.
-        for (const content of ex.lines) oldLines.push(content);
-      }
+      const oldLines: string[] = ex ? [...ex.lines] : [];
+      const newLines: string[] = ex ? [...ex.lines] : [];
       const chunkLineSides: ("old" | "new")[] = [];
       for (const line of chunk.lines) {
         if (line.type === "add") {
@@ -324,21 +321,17 @@ export function DiffViewer({
           oldLines.push(line.content);
         }
       }
-      segments.push({ expandedLen, chunkLineSides });
-    }
 
-    const oldTokens = highlightLines(oldLines, lang, shikiTheme);
-    const newTokens = highlightLines(newLines, lang, shikiTheme);
-    if (oldTokens.length === 0 && newTokens.length === 0) return null;
+      const oldTokens = highlightLines(oldLines, lang, shikiTheme);
+      const newTokens = highlightLines(newLines, lang, shikiTheme);
+      if (oldTokens.length > 0 || newTokens.length > 0) anyTokens = true;
 
-    let oldIdx = 0;
-    let newIdx = 0;
-    return segments.map(({ expandedLen, chunkLineSides }) => {
       const expandedTokens: (ThemedToken[] | undefined)[] = [];
-      for (let i = 0; i < expandedLen; i++) {
-        expandedTokens.push(oldTokens[oldIdx]);
-        oldIdx++;
+      for (let j = 0; j < expandedLen; j++) {
+        expandedTokens.push(oldTokens[j]);
       }
+      let oldIdx = expandedLen;
+      let newIdx = expandedLen;
       const lineTokens: (ThemedToken[] | undefined)[] = [];
       for (const side of chunkLineSides) {
         if (side === "new") {
@@ -351,6 +344,8 @@ export function DiffViewer({
       }
       return { expandedAbove: expandedTokens, lines: lineTokens };
     });
+
+    return anyTokens ? result : null;
   }, [ready, file, shikiTheme, highlightLines, collapsed, expanded]);
 
   const handleAddComment = (
