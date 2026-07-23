@@ -278,6 +278,7 @@ func New(cfg Config) (http.Handler, *State) {
 	mux.HandleFunc("GET /_/api/diff", handleGetDiff(state))
 	mux.HandleFunc("POST /_/api/diff", handlePostDiff(state))
 	mux.HandleFunc("GET /_/api/commits", handleCommits(state))
+	mux.HandleFunc("GET /_/api/branch", handleBranch(state))
 	mux.HandleFunc("GET /_/api/workspaces", handleListWorkspaces(state))
 	mux.HandleFunc("POST /_/api/workspaces", handleAddWorkspace(state))
 	mux.HandleFunc("DELETE /_/api/workspaces/{id}", handleRemoveWorkspace(state))
@@ -408,6 +409,24 @@ func handleCommits(state *State) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(commits)
+	}
+}
+
+func handleBranch(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		ws := state.findWorkspace(r.URL.Query().Get("ws"))
+		if ws == nil || ws.Dir == "" {
+			w.Write([]byte(`{"branch":""}`))
+			return
+		}
+
+		branch, err := gitcmd.CurrentBranch(r.Context(), ws.Dir)
+		if err != nil {
+			branch = ""
+		}
+		json.NewEncoder(w).Encode(map[string]string{"branch": branch})
 	}
 }
 

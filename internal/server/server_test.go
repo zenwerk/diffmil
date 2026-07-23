@@ -275,6 +275,42 @@ func TestCommitsWithWorkspaceFilter(t *testing.T) {
 	}
 }
 
+func TestBranchReturnsCurrentBranch(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+
+	wsList := state.Workspaces()
+	if len(wsList) != 1 {
+		t.Fatalf("got %d workspaces, want 1", len(wsList))
+	}
+
+	resp, err := http.Get(srv.URL + "/_/api/branch?ws=" + wsList[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]string
+	json.NewDecoder(resp.Body).Decode(&body)
+	resp.Body.Close()
+	if body["branch"] != "main" {
+		t.Errorf("got branch %q, want %q", body["branch"], "main")
+	}
+}
+
+func TestBranchWithoutWorkspaceReturnsEmpty(t *testing.T) {
+	srv, _ := newTestServer(t, Config{})
+
+	resp, err := http.Get(srv.URL + "/_/api/branch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]string
+	json.NewDecoder(resp.Body).Decode(&body)
+	resp.Body.Close()
+	if body["branch"] != "" {
+		t.Errorf("got branch %q, want empty", body["branch"])
+	}
+}
+
 func TestDiffSetGetPerWorkspace(t *testing.T) {
 	a := makeGitRepo(t)
 	b := makeGitRepo(t)

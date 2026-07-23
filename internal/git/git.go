@@ -106,6 +106,18 @@ func parseTags(refs string) []string {
 	return tags
 }
 
+// CurrentBranch returns the name of the currently checked-out branch.
+// Returns "" (with nil error) when HEAD is detached.
+func CurrentBranch(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // HasUncommittedChanges returns true if there are uncommitted changes (staged, unstaged, or untracked).
 func HasUncommittedChanges(ctx context.Context, dir string) bool {
 	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")

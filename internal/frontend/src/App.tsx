@@ -7,6 +7,7 @@ import {
   ClipboardCopy,
   ClipboardList,
   Trash2,
+  GitBranch,
 } from "lucide-react";
 import type { CommentThread, DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
@@ -85,6 +86,7 @@ function AppContent() {
 
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [commits, setCommits] = useState<Commit[]>([]);
+  const [branch, setBranch] = useState("");
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -349,6 +351,18 @@ function AppContent() {
     [wsParam],
   );
 
+  const fetchBranch = useCallback(
+    () =>
+      fetch("/_/api/branch" + wsParam)
+        .then((res) => {
+          if (!res.ok) return { branch: "" };
+          return res.json() as Promise<{ branch: string }>;
+        })
+        .then((data) => setBranch(data.branch ?? ""))
+        .catch(() => setBranch("")),
+    [wsParam],
+  );
+
   // Used by applyCommits to drop results from a workspace the user already
   // switched away from.
   const activeWsIdRef = useRef(wsId);
@@ -384,6 +398,7 @@ function AppContent() {
         return res.json() as Promise<DiffResponse>;
       }),
       fetchCommits(),
+      fetchBranch(),
     ])
       .then(([diff, commitList]) => {
         setDiffData(diff);
@@ -395,18 +410,20 @@ function AppContent() {
         setError(err.message);
         setLoading(false);
       });
-  }, [fetchCommits, wsParam, wsId, workspaces.length, applyCommits]);
+  }, [fetchCommits, fetchBranch, wsParam, wsId, workspaces.length, applyCommits]);
 
   // Refs so the long-lived SSE listener always sees the current active workspace
   // without forcing the EventSource to reconnect on every workspace switch.
   const wsIdSseRef = useRef(wsId);
   const wsParamSseRef = useRef(wsParam);
   const fetchCommitsRef = useRef(fetchCommits);
+  const fetchBranchRef = useRef(fetchBranch);
   useEffect(() => {
     wsIdSseRef.current = wsId;
     wsParamSseRef.current = wsParam;
     fetchCommitsRef.current = fetchCommits;
-  }, [wsId, wsParam, fetchCommits]);
+    fetchBranchRef.current = fetchBranch;
+  }, [wsId, wsParam, fetchCommits, fetchBranch]);
 
   useEffect(() => {
     const es = new EventSource("/_/events");
@@ -440,6 +457,7 @@ function AppContent() {
     es.addEventListener("commits-changed", (e) => {
       if (!isRelevant((e as MessageEvent).data)) return;
       const wsAtFetch = wsIdSseRef.current;
+      void fetchBranchRef.current();
       fetchCommitsRef.current().then((commitList) => {
         applyCommits(wsAtFetch, commitList);
         setToastMessage("New commits detected");
@@ -521,6 +539,15 @@ function AppContent() {
             void renameWorkspace(id, label);
           }}
         />
+        {branch && (
+          <span
+            title={`現在のブランチ: ${branch}`}
+            className="flex items-center gap-1 font-mono text-xs text-gh-text-muted shrink-0 max-w-[200px]"
+          >
+            <GitBranch size={12} className="shrink-0" />
+            <span className="truncate">{branch}</span>
+          </span>
+        )}
         {selectedCommitInfo && (
           <div className="flex items-center gap-2 min-w-0 group relative">
             <span className="font-mono text-xs text-gh-text-muted shrink-0">
