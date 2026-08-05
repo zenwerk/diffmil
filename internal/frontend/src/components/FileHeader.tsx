@@ -11,12 +11,17 @@ interface FileHeaderProps {
   threadCount: number;
 }
 
+// FILE_HEADER_HEIGHT is the rendered height of <FileHeader> in px: py-2
+// (8 + 8) + text-sm line (20) + 1px bottom border. The Virtualizer uses it to
+// estimate file placeholder sizes (see App's diffMetrics), so it lives next to
+// the class list it is derived from — change the padding/border here and this
+// constant together.
+export const FILE_HEADER_HEIGHT = 37;
+
 // FileHeader is the sticky bar above a file's diff body: collapse toggle,
 // status letter, path (with rename arrow), comment badge and +/- counts.
 // Shared by PierreDiffViewer and the RawDiffViewer fallback so both present
-// identical chrome around differing diff bodies. Its rendered height is
-// mirrored in App's `diffMetrics.diffHeaderHeight` for the Virtualizer, so
-// changing this element's padding/border means updating that constant too.
+// identical chrome around differing diff bodies.
 export function FileHeader({
   file,
   collapsed,

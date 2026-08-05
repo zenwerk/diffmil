@@ -39,7 +39,7 @@ function mkThread(
 }
 
 function mkPending(over: Partial<PendingForm> = {}): PendingForm {
-  return { side: "new", line: 5, endLine: 5, formAt: 5, content: "", ...over };
+  return { side: "new", line: 5, endLine: 5, content: "", ...over };
 }
 
 // A small file: hunk covers old lines 10-12 and new lines 10-13, with one
@@ -106,7 +106,7 @@ describe("buildAnnotations", () => {
       {
         side: "deletions",
         lineNumber: 11,
-        metadata: { kind: "threads", threads: [mkThread("t1", "old", 11)] },
+        metadata: { threads: [mkThread("t1", "old", 11)], showForm: false },
       },
     ]);
   });
@@ -123,7 +123,7 @@ describe("buildAnnotations", () => {
     const threads = [mkThread("t1", "new", 4), mkThread("t2", "new", 4)];
     const annotations = buildAnnotations(threads, null);
     expect(annotations).toHaveLength(1);
-    expect(annotations[0].metadata).toEqual({ kind: "threads", threads });
+    expect(annotations[0].metadata).toEqual({ threads, showForm: false });
   });
 
   it("groups threads that share an anchor line via different ranges", () => {
@@ -132,7 +132,7 @@ describe("buildAnnotations", () => {
     const b = mkThread("t2", "new", 3, 8);
     const annotations = buildAnnotations([a, b], null);
     expect(annotations).toHaveLength(1);
-    expect(annotations[0].metadata).toEqual({ kind: "threads", threads: [a, b] });
+    expect(annotations[0].metadata).toEqual({ threads: [a, b], showForm: false });
   });
 
   it("keeps threads on the same line but opposite sides separate", () => {
@@ -143,17 +143,14 @@ describe("buildAnnotations", () => {
     expect(annotations.map((a) => a.side)).toEqual(["deletions", "additions"]);
   });
 
-  it("emits a form annotation at the pending form line", () => {
-    expect(buildAnnotations([], mkPending({ formAt: 12 }))).toEqual([
-      { side: "additions", lineNumber: 12, metadata: { kind: "form", threads: [] } },
+  it("emits a form annotation at the pending form's end line", () => {
+    expect(buildAnnotations([], mkPending({ line: 12, endLine: 12 }))).toEqual([
+      { side: "additions", lineNumber: 12, metadata: { threads: [], showForm: true } },
     ]);
   });
 
-  it("anchors the form on formAt, not on the range start", () => {
-    const annotations = buildAnnotations(
-      [],
-      mkPending({ line: 4, endLine: 9, formAt: 9 }),
-    );
+  it("anchors the form on the range's end line, not its start", () => {
+    const annotations = buildAnnotations([], mkPending({ line: 4, endLine: 9 }));
     expect(annotations[0].lineNumber).toBe(9);
   });
 
@@ -161,19 +158,22 @@ describe("buildAnnotations", () => {
     // Two annotations on one (side, line) would collide in the library's slot
     // map, so the form and the cards must travel together.
     const thread = mkThread("t1", "new", 6);
-    const annotations = buildAnnotations([thread], mkPending({ formAt: 6 }));
+    const annotations = buildAnnotations([thread], mkPending({ line: 6, endLine: 6 }));
     expect(annotations).toHaveLength(1);
     expect(annotations[0].metadata).toEqual({
-      kind: "threads-and-form",
       threads: [thread],
+      showForm: true,
     });
   });
 
   it("does not merge the form into a thread on the other side", () => {
     const thread = mkThread("t1", "old", 6);
-    const annotations = buildAnnotations([thread], mkPending({ side: "new", formAt: 6 }));
+    const annotations = buildAnnotations(
+      [thread],
+      mkPending({ side: "new", line: 6, endLine: 6 }),
+    );
     expect(annotations).toHaveLength(2);
-    expect(annotations.map((a) => a.metadata.kind)).toEqual(["threads", "form"]);
+    expect(annotations.map((a) => a.metadata.showForm)).toEqual([false, true]);
   });
 
   it("orders annotations by side then line for a stable array", () => {
@@ -209,14 +209,6 @@ describe("buildSelectedLines", () => {
     });
   });
 
-  it("normalizes an inverted range", () => {
-    expect(buildSelectedLines(mkPending({ side: "old", line: 9, endLine: 4 }))).toEqual({
-      start: 4,
-      side: "deletions",
-      end: 9,
-      endSide: "deletions",
-    });
-  });
 });
 
 describe("hasLineOnSide", () => {

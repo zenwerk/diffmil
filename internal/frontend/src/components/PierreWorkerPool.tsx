@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   WorkerPoolContextProvider,
   useWorkerPool,
@@ -11,8 +11,10 @@ import DiffsWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url";
 import { useTheme } from "../hooks/useTheme";
 
 // Languages preloaded into every worker so the first render of a common file
-// type does not pay a lazy-load round trip. Anything not listed still works;
-// it just resolves on demand.
+// type does not pay a lazy-load round trip. Kept deliberately small: each
+// worker loads every listed grammar at startup, so this list multiplies both
+// boot time and per-worker memory. Anything not listed still works; it just
+// resolves on demand.
 const PRELOAD_LANGS: WorkerInitializationRenderOptions["langs"] = [
   "typescript",
   "tsx",
@@ -20,14 +22,7 @@ const PRELOAD_LANGS: WorkerInitializationRenderOptions["langs"] = [
   "jsx",
   "go",
   "json",
-  "css",
-  "html",
   "markdown",
-  "yaml",
-  "python",
-  "rust",
-  "sh",
-  "sql",
 ];
 
 // Keep the pool small: highlighting is bursty and each worker holds its own
@@ -45,8 +40,22 @@ function ThemeSync({ children }: { children: ReactNode }) {
   const pool = useWorkerPool();
   const { darkShikiTheme, lightShikiTheme } = useTheme();
 
+  // The pool was created with the mount-time theme (see highlighterOptions),
+  // so the effect's first run would re-send the exact same values to every
+  // worker — and setRenderOptions clears the render cache, forcing a pointless
+  // re-highlight right after startup. Track what the pool already has and only
+  // push actual changes.
+  const applied = useRef({ dark: darkShikiTheme, light: lightShikiTheme });
+
   useEffect(() => {
     if (pool == null) return;
+    if (
+      applied.current.dark === darkShikiTheme &&
+      applied.current.light === lightShikiTheme
+    ) {
+      return;
+    }
+    applied.current = { dark: darkShikiTheme, light: lightShikiTheme };
     void pool
       .setRenderOptions({
         theme: { dark: darkShikiTheme, light: lightShikiTheme },

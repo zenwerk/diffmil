@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluekeyes/go-gitdiff/gitdiff"
 	"github.com/pkg/browser"
 	"github.com/zenwerk/diffmil/internal/backup"
 	"github.com/zenwerk/diffmil/internal/diff"
@@ -560,29 +559,25 @@ func postWorkspace(baseURL, dir string) (*server.Workspace, error) {
 func buildConfig(ctx context.Context, args []string) (server.Config, error) {
 	var cfg server.Config
 
-	reader, err := getDiffReader(ctx, args, &cfg)
+	raw, err := readDiffInput(ctx, args, &cfg)
 	if err != nil {
 		return cfg, err
 	}
 
-	raw, err := io.ReadAll(reader)
-	if err != nil {
-		return cfg, fmt.Errorf("failed to read diff: %w", err)
-	}
-
-	files, _, err := gitdiff.Parse(bytes.NewReader(raw))
+	cfg.InitialDiff, err = diff.ParsePatch(raw)
 	if err != nil {
 		return cfg, fmt.Errorf("failed to parse diff: %w", err)
 	}
-
-	cfg.InitialDiff = diff.FromGitDiff(files)
-	cfg.InitialDiff.Patch = string(raw)
 	return cfg, nil
 }
 
-func getDiffReader(ctx context.Context, args []string, cfg *server.Config) (io.Reader, error) {
+func readDiffInput(ctx context.Context, args []string, cfg *server.Config) ([]byte, error) {
 	if isStdinPipe() {
-		return os.Stdin, nil
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read diff: %w", err)
+		}
+		return raw, nil
 	}
 
 	cwd, err := os.Getwd()

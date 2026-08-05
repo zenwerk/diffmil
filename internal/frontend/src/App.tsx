@@ -10,11 +10,12 @@ import {
   GitBranch,
 } from "lucide-react";
 import { Virtualizer } from "@pierre/diffs/react";
-import type { VirtualFileMetrics } from "@pierre/diffs";
+import { DEFAULT_VIRTUAL_FILE_METRICS, type VirtualFileMetrics } from "@pierre/diffs";
 import type { CommentThread, DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
 import { RawDiffViewer } from "./components/RawDiffViewer";
+import { FILE_HEADER_HEIGHT } from "./components/FileHeader";
 import { PierreDiffViewer } from "./components/PierreDiffViewer";
 import { PierreWorkerPool } from "./components/PierreWorkerPool";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -268,6 +269,8 @@ function AppContent() {
   // The @pierre/diffs metadata is mutated in place as context is expanded, so
   // it must be parsed exactly once per patch and the same object identities
   // reused on every render. Keyed on the patch text alone for that reason.
+  // Fallback decisions (and their warnings) live here too, so they run once
+  // per parse instead of on every render of the file list.
   const pierreFileDiffs = useMemo(() => {
     const patch = diffData?.patch;
     if (!patch) {
@@ -282,10 +285,23 @@ function AppContent() {
     // The content-derived cache key prefix is what keeps two diffs of the
     // same file path (working tree vs a commit) from colliding in the
     // library's render cache — see patchCacheKeyPrefix.
-    return buildFileDiffMap(patch, patchCacheKeyPrefix("patch", patch));
+    const map = buildFileDiffMap(patch, patchCacheKeyPrefix(patch));
+    for (const file of diffData?.files ?? []) {
+      if (!file.isBinary && !findFileDiff(map, file.path, file.oldPath)) {
+        console.warn(
+          `diffmil: no @pierre/diffs metadata for "${file.path}"; rendering it as raw text.`,
+        );
+      }
+    }
+    return map;
   }, [diffData]);
 
   const monoFont = getMonoFontById(fontId);
+  // The single source for the diff line height: the CSS variable the shadow
+  // DOM inherits and the Virtualizer's height estimate must agree, or scroll
+  // position drifts as files hydrate.
+  const diffLineHeight = Math.round(diffFontSize * 1.5);
+
   // @pierre/diffs renders inside a shadow root, which blocks page CSS but
   // still inherits custom properties, so its typography is configured by
   // setting these variables on an ancestor.
@@ -294,30 +310,38 @@ function AppContent() {
       ({
         "--diffs-font-family": monoFont?.family ?? "ui-monospace",
         "--diffs-font-size": `${diffFontSize}px`,
-        "--diffs-line-height": `${Math.round(diffFontSize * 1.5)}px`,
+        "--diffs-line-height": `${diffLineHeight}px`,
         "--diffs-font-features": monoFont?.ligatures
           ? '"liga" 1, "calt" 1'
           : "normal",
       }) as React.CSSProperties,
-    [monoFont, diffFontSize],
+    [monoFont, diffFontSize, diffLineHeight],
   );
 
   // Height estimates the Virtualizer uses to size a file's placeholder before
   // it is rendered and measured. They must track diffmil's real layout or the
-  // scroll bar jumps as files hydrate:
-  //   - lineHeight matches --diffs-line-height above.
-  //   - diffHeaderHeight covers our own <FileHeader>: px-4 py-2 (8px top +
-  //     8px bottom) around a text-sm/leading-5 row, plus the 1px bottom
-  //     border = 37px. (The library's own header is disabled.)
-  //   - spacing is the mb-4 gap between file cards.
+  // scroll bar jumps as files hydrate; the header height lives next to
+  // FileHeader's class list, and spacing is the mb-4 gap between file cards.
   const diffMetrics = useMemo<VirtualFileMetrics>(
     () => ({
-      hunkLineCount: 50,
-      lineHeight: Math.round(diffFontSize * 1.5),
-      diffHeaderHeight: 37,
+      ...DEFAULT_VIRTUAL_FILE_METRICS,
+      lineHeight: diffLineHeight,
+      diffHeaderHeight: FILE_HEADER_HEIGHT,
       spacing: 16,
     }),
-    [diffFontSize],
+    [diffLineHeight],
+  );
+
+  const selectedCommitInfo = useMemo(
+    () => (selectedCommit ? commits.find((c) => c.hash === selectedCommit) ?? null : null),
+    [commits, selectedCommit],
+  );
+  // Memoized because it flows into every viewer's renderAnnotation callback:
+  // a fresh object each render would defeat the viewers' memo() and re-project
+  // every annotation on unrelated App state changes.
+  const commitContext = useMemo(
+    () => (selectedCommit ? toCommitContext(selectedCommitInfo, selectedCommit) : undefined),
+    [selectedCommitInfo, selectedCommit],
   );
 
   const commitPanel = usePanelResize("diffmil.commitsPanelWidth", 300, 160, 600, "right");
@@ -577,12 +601,6 @@ function AppContent() {
 
   const files = diffData?.files ?? [];
   const hasCommits = commits.length > 0;
-  const selectedCommitInfo = selectedCommit
-    ? commits.find((c) => c.hash === selectedCommit) ?? null
-    : null;
-  const commitContext = selectedCommit
-    ? toCommitContext(selectedCommitInfo, selectedCommit)
-    : undefined;
 
   return (
     <div className="h-screen flex flex-col">
@@ -825,23 +843,21 @@ function AppContent() {
               contentClassName="p-4"
             >
               {files.map((file) => {
+                // All props are referentially stable across App re-renders
+                // (the viewers are memo()ed), so unrelated state changes —
+                // toasts, panel drags — skip every file subtree.
                 const shared = {
                   file,
                   collapsed: collapsedFiles.has(file.path),
-                  onToggleCollapsed: () => toggleFileCollapsed(file.path),
+                  onToggleCollapsed: toggleFileCollapsed,
                   threads: threadsByFile.get(file.path) ?? EMPTY_THREADS,
                 };
+                // Files the patch parse did not account for degrade on their
+                // own to the raw text view (warned once at parse time), so one
+                // unmatched path cannot blank out the rest of the diff.
                 const fileDiff = pierreFileDiffs
                   ? findFileDiff(pierreFileDiffs, file.path, file.oldPath)
                   : undefined;
-                // Any file the patch parse did not account for degrades on its
-                // own to the raw text view, so one unmatched path cannot blank
-                // out the rest of the diff.
-                if (pierreFileDiffs && !fileDiff) {
-                  console.warn(
-                    `diffmil: no @pierre/diffs metadata for "${file.path}"; rendering it as raw text.`,
-                  );
-                }
                 return fileDiff ? (
                   <PierreDiffViewer
                     key={file.path}

@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import { FileDiff, useStableCallback, type FileDiffMetadata } from "@pierre/diffs/react";
 import type {
   DiffLineAnnotation,
-  FileDiffContentsLoader,
   FileDiffOptions,
   SelectedLineRange,
   VirtualFileMetrics,
@@ -14,13 +13,12 @@ import type {
   DiffSide,
   DiffViewMode,
 } from "../types";
-import { FileHeader } from "./FileHeader";
+import { FileCard } from "./FileCard";
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { useTheme } from "../hooks/useTheme";
 import type { CommitContext } from "../utils/commentPrompt";
 import { collectRangeSnapshot } from "../utils/diffLine";
-import { fetchFileContents } from "../utils/fileContents";
 import { buildDiffFilesLoader } from "../utils/pierreLoader";
 import {
   buildAnnotations,
@@ -44,7 +42,9 @@ interface PierreDiffViewerProps {
   metrics: VirtualFileMetrics;
   viewMode: DiffViewMode;
   collapsed: boolean;
-  onToggleCollapsed: () => void;
+  // Receives the file path so App can pass one stable callback to every
+  // viewer, which is what lets the memo() wrapper below actually skip renders.
+  onToggleCollapsed: (path: string) => void;
   threads: CommentThread[];
   commitContext?: CommitContext;
   workspaceId?: string;
@@ -61,24 +61,21 @@ interface PierreDiffViewerProps {
   onCommentCopied?: () => void;
 }
 
-// PierreDiffViewer renders a single file's diff with @pierre/diffs while
-// keeping diffmil's own file chrome (sticky header + anchor id) so the two
-// renderers are visually interchangeable.
+// PierreDiffViewer renders a single file's diff with @pierre/diffs inside the
+// shared FileCard chrome.
 //
-// Phase 3 adds hunk-boundary context expansion via `loadDiffFiles` (see
-// pierreLoader.ts).
+// Context expansion goes through `loadDiffFiles` (see pierreLoader.ts).
+// Comments ride the library's annotation and selection APIs: threads and the
+// open comment form become `lineAnnotations` projected into light-DOM slots
+// (so the existing Tailwind CommentCard/CommentForm render unchanged), and
+// range selection is the library's built-in drag/Shift+click handling.
+// Under App's <Virtualizer> the <FileDiff> below becomes a VirtualizedFileDiff
+// automatically; `metrics` is its height estimate before real measurement.
 //
-// Phase 4 wires comments in through the library's annotation and selection
-// APIs: threads and the open comment form become `lineAnnotations` projected
-// into light-DOM slots (so the existing Tailwind CommentCard/CommentForm
-// render unchanged), and range selection is driven by the library's built-in
-// drag/Shift+click handling instead of the legacy per-row click plumbing.
-//
-// Phase 5 makes this the only real diff renderer and adds virtualization:
-// App wraps the file list in <Virtualizer>, which turns the <FileDiff> below
-// into a VirtualizedFileDiff automatically. `metrics` is what that instance
-// uses to estimate height before the file is measured.
-export function PierreDiffViewer({
+// memo: App re-renders on every piece of global state (toasts, panel drags…)
+// and maps over all files each time; with stable props this skips the
+// per-file subtree entirely.
+export const PierreDiffViewer = memo(function PierreDiffViewer({
   file,
   fileDiff,
   metrics,
@@ -97,14 +94,10 @@ export function PierreDiffViewer({
 
   // The open comment form, or null when none is open. Selection highlight is
   // derived from this (see `selectedLines`), so the pending form is the single
-  // source of truth for "what is being commented on".
+  // source of truth for "what is being commented on". No reset on file/commit
+  // change is needed: App keys viewers by file path and the Virtualizer by
+  // commit, so either change remounts this component.
   const [pending, setPending] = useState<PendingForm | null>(null);
-
-  // Drop a stale form when the user navigates to another commit or the file
-  // itself changes — its line numbers no longer refer to what is on screen.
-  useEffect(() => {
-    setPending(null);
-  }, [file.path, commitContext?.hash]);
 
   // Collapsing the file unmounts the diff body (and with it the annotation
   // slots), so an open form would survive invisibly and reappear on expand.
@@ -112,38 +105,33 @@ export function PierreDiffViewer({
     if (collapsed) setPending(null);
   }, [collapsed]);
 
-  // commit is the legacy blobLines convention: an explicit hash targets that
-  // commit (side=new) and its parent (side=old); no hash means the working
-  // tree (side=new) diffed against HEAD (side=old).
+  // commit convention: an explicit hash targets that commit (side=new) and its
+  // parent (side=old); no hash means the working tree diffed against HEAD.
   const commit = commitContext?.hash;
 
-  // Stable across renders so `options` below (and thus `areOptionsEqual`
-  // inside the library) doesn't see a new function identity every render.
-  const fetcher = useCallback(fetchFileContents, []);
-
-  // canExpand mirrors `canHydrateDiff` in @pierre/diffs: only 'change',
-  // 'rename-changed', and 'rename-pure' diffs can be hydrated from full file
-  // contents. Added/deleted files already carry one full side from the patch
-  // parse, so a loader for them would either never be called or (worse) be
-  // called for a shape the loader can't safely satisfy.
+  // Only 'change'/'rename-changed'/'rename-pure' diffs can be hydrated from
+  // full file contents (added/deleted files already carry their one full side
+  // from the patch parse), and hydration needs a workspace to fetch from.
+  // Binary files never render a FileDiff at all (see FileCard), so they need
+  // no exclusion here.
   const canExpand =
-    Boolean(workspaceId) && !file.isBinary && file.status !== "added" && file.status !== "deleted";
+    workspaceId != null && file.status !== "added" && file.status !== "deleted";
 
-  const loadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(
+  const loadDiffFiles = useMemo(
     () =>
-      canExpand
-        ? buildDiffFilesLoader({ workspaceId, commit, fetcher })
+      canExpand && workspaceId != null
+        ? buildDiffFilesLoader({ workspaceId, commit })
         : undefined,
-    [canExpand, workspaceId, commit, fetcher],
+    [canExpand, workspaceId, commit],
   );
 
   // openPendingForRange turns a library selection into a pending form.
   //
   // Two things are normalized here. First, the range is clamped to lines that
   // exist in `file.chunks`: the library happily selects expanded context rows
-  // (Phase 3 hydration) which carry no comment anchor, and the legacy renderer
-  // never offered comments there. Second, the form is anchored on the range's
-  // last commentable line, matching where the legacy form appeared.
+  // which carry no comment anchor, and the legacy renderer never offered
+  // comments there. Second, the form is anchored on the range's last
+  // commentable line, matching where the legacy form appeared.
   //
   // A selection with no commentable line leaves any existing form untouched.
   const openPendingForRange = useCallback(
@@ -158,7 +146,6 @@ export function PierreDiffViewer({
         side,
         line: clamped.line,
         endLine: clamped.endLine,
-        formAt: clamped.endLine,
         content: collectRangeSnapshot(file, side, clamped.line, clamped.endLine),
       });
     },
@@ -189,7 +176,6 @@ export function PierreDiffViewer({
       side,
       line: lineNumber,
       endLine: lineNumber,
-      formAt: lineNumber,
       content: collectRangeSnapshot(file, side, lineNumber, lineNumber),
     });
   });
@@ -203,7 +189,7 @@ export function PierreDiffViewer({
       side: pending.side,
       line: pending.line,
       // endLine stays undefined for single-line threads, matching the storage
-      // schema the legacy renderer writes (and that CommentCard formats from).
+      // schema the legacy renderer wrote (and that CommentCard formats from).
       endLine: pending.endLine !== pending.line ? pending.endLine : undefined,
       body,
       codeSnapshot: pending.content,
@@ -222,8 +208,7 @@ export function PierreDiffViewer({
 
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<AnnotationMeta>) => {
-      const { kind, threads: lineThreads } = annotation.metadata;
-      const showForm = kind === "form" || kind === "threads-and-form";
+      const { threads: lineThreads, showForm } = annotation.metadata;
       return (
         <div className="flex flex-col gap-2 p-2">
           {lineThreads.map((thread) => (
@@ -283,9 +268,9 @@ export function PierreDiffViewer({
     () => ({
       diffStyle: viewMode === "split" ? "split" : "unified",
       // 'classic' draws the familiar +/- prefix column, matching what the
-      // legacy renderer shows (the library default is 'bars').
+      // legacy renderer showed (the library default is 'bars').
       diffIndicators: "classic",
-      // diffmil supplies its own header via <FileHeader> above.
+      // diffmil supplies its own header via <FileCard> around this component.
       disableFileHeader: true,
       themeType: mode,
       theme: { dark: darkShikiTheme, light: lightShikiTheme },
@@ -326,33 +311,27 @@ export function PierreDiffViewer({
     ],
   );
 
-  return (
-    <div
-      id={`file-${encodeURIComponent(file.path)}`}
-      className="border border-gh-border rounded-md mb-4 overflow-hidden"
-    >
-      <FileHeader
-        file={file}
-        collapsed={collapsed}
-        onToggleCollapsed={onToggleCollapsed}
-        threadCount={threads.length}
-      />
-
-      {collapsed ? null : file.isBinary ? (
-        <div className="px-4 py-3 text-gh-text-muted text-sm italic">
-          Binary file not shown
-        </div>
-      ) : (
-        <FileDiff
-          fileDiff={fileDiff}
-          metrics={metrics}
-          options={options}
-          lineAnnotations={lineAnnotations}
-          selectedLines={selectedLines}
-          renderAnnotation={renderAnnotation}
-          renderGutterUtility={renderGutterUtility}
-        />
-      )}
-    </div>
+  const toggleCollapsed = useCallback(
+    () => onToggleCollapsed(file.path),
+    [onToggleCollapsed, file.path],
   );
-}
+
+  return (
+    <FileCard
+      file={file}
+      collapsed={collapsed}
+      onToggleCollapsed={toggleCollapsed}
+      threadCount={threads.length}
+    >
+      <FileDiff
+        fileDiff={fileDiff}
+        metrics={metrics}
+        options={options}
+        lineAnnotations={lineAnnotations}
+        selectedLines={selectedLines}
+        renderAnnotation={renderAnnotation}
+        renderGutterUtility={renderGutterUtility}
+      />
+    </FileCard>
+  );
+});

@@ -1,9 +1,7 @@
 package git
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -25,34 +23,24 @@ type Commit struct {
 // parser on the frontend cannot match back to file paths.
 var stdPrefixConfig = []string{"-c", "diff.mnemonicprefix=false", "-c", "diff.noprefix=false"}
 
-// Diff runs `git diff` with the given arguments and returns the output as an io.Reader.
-func Diff(ctx context.Context, dir string, args []string) (io.Reader, error) {
-	cmdArgs := append([]string{}, stdPrefixConfig...)
-	cmdArgs = append(cmdArgs, "diff", "--no-ext-diff", "--color=never")
-	cmdArgs = append(cmdArgs, args...)
-
+// runDiff executes a diff-producing git subcommand with stdPrefixConfig
+// applied, so every diff this package emits carries the standard prefixes.
+func runDiff(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmdArgs := append(append([]string{}, stdPrefixConfig...), args...)
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 	cmd.Dir = dir
+	return cmd.Output()
+}
 
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(out), nil
+// Diff runs `git diff` with the given arguments and returns the raw patch.
+func Diff(ctx context.Context, dir string, args []string) ([]byte, error) {
+	cmdArgs := append([]string{"diff", "--no-ext-diff", "--color=never"}, args...)
+	return runDiff(ctx, dir, cmdArgs...)
 }
 
 // DiffShow runs `git diff-tree -p` for a single commit to get its diff.
-func DiffShow(ctx context.Context, dir string, hash string) (io.Reader, error) {
-	cmdArgs := append([]string{}, stdPrefixConfig...)
-	cmdArgs = append(cmdArgs, "diff-tree", "-p", "--no-ext-diff", "--color=never", "-r", "--root", hash)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-	cmd.Dir = dir
-
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(out), nil
+func DiffShow(ctx context.Context, dir string, hash string) ([]byte, error) {
+	return runDiff(ctx, dir, "diff-tree", "-p", "--no-ext-diff", "--color=never", "-r", "--root", hash)
 }
 
 // Log returns the recent commit history.
@@ -139,17 +127,8 @@ func HasUncommittedChanges(ctx context.Context, dir string) bool {
 }
 
 // DiffUncommitted returns the diff of uncommitted changes against HEAD.
-func DiffUncommitted(ctx context.Context, dir string) (io.Reader, error) {
-	cmdArgs := append([]string{}, stdPrefixConfig...)
-	cmdArgs = append(cmdArgs, "diff", "--no-ext-diff", "--color=never", "HEAD")
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-	cmd.Dir = dir
-
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(out), nil
+func DiffUncommitted(ctx context.Context, dir string) ([]byte, error) {
+	return runDiff(ctx, dir, "diff", "--no-ext-diff", "--color=never", "HEAD")
 }
 
 // IsGitRepo returns true if the given directory is inside a git repository.

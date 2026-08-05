@@ -27,17 +27,15 @@ import { fetchFileContents } from "./fileContents";
 //    retry on the next click). It does NOT fall back to partial/fake data.
 //    That means throwing on a failed fetch is the correct way to signal
 //    failure; returning fabricated FileContents would corrupt the diff.
+// The caller decides whether expansion is possible at all (see canExpand in
+// PierreDiffViewer) — a workspace id is therefore required here, and this
+// function always returns a working loader.
 export function buildDiffFilesLoader(params: {
-  workspaceId?: string;
+  workspaceId: string;
   commit?: string;
   fetcher?: typeof fetchFileContents;
-}): FileDiffContentsLoader | undefined {
+}): FileDiffContentsLoader {
   const { workspaceId, commit } = params;
-  // No workspace means there's no server-side blob to read from, so there's
-  // nothing a loader could fetch — matching current parity, omit it entirely
-  // (no loader = no expand button, same as before Phase 3).
-  if (!workspaceId) return undefined;
-
   const fetcher = params.fetcher ?? fetchFileContents;
 
   return async function loadDiffFiles(

@@ -439,86 +439,6 @@ func TestIsSafeRelPath(t *testing.T) {
 	}
 }
 
-func TestBlobLinesReturnsFileLines(t *testing.T) {
-	dir := makeGitRepo(t)
-	// Replace README.md with a multi-line file and commit so HEAD has known
-	// content for blob-lines to read.
-	content := "L1\nL2\nL3\nL4\nL5\n"
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	run("add", "README.md")
-	run("commit", "-q", "-m", "expand")
-
-	srv, _ := newTestServer(t, Config{RepoDir: dir})
-
-	// Discover the workspace id assigned to the initial RepoDir.
-	wsResp, err := http.Get(srv.URL + "/_/api/workspaces")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var workspaces []Workspace
-	json.NewDecoder(wsResp.Body).Decode(&workspaces)
-	wsResp.Body.Close()
-	if len(workspaces) != 1 {
-		t.Fatalf("got %d workspaces, want 1", len(workspaces))
-	}
-	wsID := workspaces[0].ID
-
-	q := "?ws=" + wsID + "&commit=" + workingTreeHash + "&path=README.md&side=new&start=2&end=4"
-	resp, err := http.Get(srv.URL + "/_/api/blob-lines" + q)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var got struct {
-		Lines      []string `json:"lines"`
-		TotalLines int      `json:"totalLines"`
-	}
-	json.NewDecoder(resp.Body).Decode(&got)
-	if want := []string{"L2", "L3", "L4"}; !slicesEqual(got.Lines, want) {
-		t.Errorf("lines = %v, want %v", got.Lines, want)
-	}
-	if got.TotalLines != 5 {
-		t.Errorf("totalLines = %d, want 5", got.TotalLines)
-	}
-}
-
-func TestBlobLinesRejectsTraversal(t *testing.T) {
-	dir := makeGitRepo(t)
-	srv, _ := newTestServer(t, Config{RepoDir: dir})
-	wsResp, _ := http.Get(srv.URL + "/_/api/workspaces")
-	var workspaces []Workspace
-	json.NewDecoder(wsResp.Body).Decode(&workspaces)
-	wsResp.Body.Close()
-	wsID := workspaces[0].ID
-
-	q := "?ws=" + wsID + "&commit=working&path=../etc/passwd&side=new&start=1&end=1"
-	resp, err := http.Get(srv.URL + "/_/api/blob-lines" + q)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
 func TestGetDiffWithCommitIncludesPatch(t *testing.T) {
 	dir := makeGitRepo(t)
 	content := "L1\nL2\nL3\n"
@@ -738,16 +658,4 @@ func TestFileRejectsMissingWorkspace(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
-}
-
-func slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

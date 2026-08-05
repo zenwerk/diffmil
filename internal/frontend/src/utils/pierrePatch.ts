@@ -26,14 +26,14 @@ import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
 // collide in the render cache, and switching commits keeps showing the stale
 // DOM for any file present in both. A content-derived prefix keeps revisits
 // of the same patch cache-friendly while distinct patches stay distinct.
-export function patchCacheKeyPrefix(scope: string, patch: string): string {
+export function patchCacheKeyPrefix(patch: string): string {
   // FNV-1a, 32-bit. Not cryptographic — just cheap and stable content identity.
   let hash = 0x811c9dc5;
   for (let i = 0; i < patch.length; i++) {
     hash ^= patch.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  return `${scope}:${(hash >>> 0).toString(36)}`;
+  return `patch:${(hash >>> 0).toString(36)}`;
 }
 
 export function buildFileDiffMap(patch: string, cacheKeyPrefix?: string): Map<string, FileDiffMetadata> {

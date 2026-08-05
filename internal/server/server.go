@@ -1,20 +1,16 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/bluekeyes/go-gitdiff/gitdiff"
 	"github.com/zenwerk/diffmil/internal/diff"
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
 	"github.com/zenwerk/diffmil/internal/static"
@@ -281,7 +277,6 @@ func New(cfg Config) (http.Handler, *State) {
 
 	mux.HandleFunc("GET /_/api/diff", handleGetDiff(state))
 	mux.HandleFunc("POST /_/api/diff", handlePostDiff(state))
-	mux.HandleFunc("GET /_/api/blob-lines", handleBlobLines(state))
 	mux.HandleFunc("GET /_/api/file", handleFile(state))
 	mux.HandleFunc("GET /_/api/commits", handleCommits(state))
 	mux.HandleFunc("GET /_/api/branch", handleBranch(state))
@@ -299,21 +294,6 @@ func New(cfg Config) (http.Handler, *State) {
 }
 
 const workingTreeHash = "working"
-
-// parseDiffFromReader parses a unified diff from a reader into a DiffResponse.
-func parseDiffFromReader(r io.Reader) (*diff.DiffResponse, error) {
-	raw, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-	files, _, err := gitdiff.Parse(bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	resp := diff.FromGitDiff(files)
-	resp.Patch = string(raw)
-	return resp, nil
-}
 
 func handleGetDiff(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -333,20 +313,20 @@ func handleGetDiff(state *State) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		var reader io.Reader
+		var raw []byte
 		var err error
 
 		if commitHash == workingTreeHash {
-			reader, err = gitcmd.DiffUncommitted(ctx, ws.Dir)
+			raw, err = gitcmd.DiffUncommitted(ctx, ws.Dir)
 		} else {
-			reader, err = gitcmd.DiffShow(ctx, ws.Dir, commitHash)
+			raw, err = gitcmd.DiffShow(ctx, ws.Dir, commitHash)
 		}
 		if err != nil {
 			http.Error(w, `{"error":"failed to get diff"}`, http.StatusInternalServerError)
 			return
 		}
 
-		resp, err := parseDiffFromReader(reader)
+		resp, err := diff.ParsePatch(raw)
 		if err != nil {
 			http.Error(w, `{"error":"failed to parse diff"}`, http.StatusInternalServerError)
 			return
@@ -596,70 +576,6 @@ func handleSSE(state *State) http.HandlerFunc {
 	}
 }
 
-// handleBlobLines returns a slice of lines from a file at a given commit,
-// used by the frontend to expand context above/below a diff hunk.
-func handleBlobLines(state *State) http.HandlerFunc {
-	type response struct {
-		Lines      []string `json:"lines"`
-		TotalLines int      `json:"totalLines"`
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		q := r.URL.Query()
-
-		ws := state.findWorkspace(q.Get("ws"))
-		if ws == nil || ws.Dir == "" {
-			http.Error(w, `{"error":"no workspace"}`, http.StatusBadRequest)
-			return
-		}
-
-		path := q.Get("path")
-		if !isSafeRelPath(path) {
-			http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
-			return
-		}
-
-		side := q.Get("side")
-		if side != "old" && side != "new" {
-			http.Error(w, `{"error":"side must be old or new"}`, http.StatusBadRequest)
-			return
-		}
-
-		start, err1 := strconv.Atoi(q.Get("start"))
-		end, err2 := strconv.Atoi(q.Get("end"))
-		if err1 != nil || err2 != nil || start < 1 || end < start {
-			http.Error(w, `{"error":"invalid range"}`, http.StatusBadRequest)
-			return
-		}
-
-		commit := q.Get("commit")
-
-		blob, err := readBlobForSide(r.Context(), ws.Dir, commit, side, path)
-		if err != nil {
-			http.Error(w, `{"error":"failed to read blob"}`, http.StatusInternalServerError)
-			return
-		}
-		if blob == nil {
-			// Not available (e.g. added/removed file on the requested side, or
-			// stdin-supplied diff whose path isn't in this workspace's git).
-			json.NewEncoder(w).Encode(response{Lines: []string{}, TotalLines: 0})
-			return
-		}
-
-		all := splitLines(blob)
-		total := len(all)
-		if start > total {
-			json.NewEncoder(w).Encode(response{Lines: []string{}, TotalLines: total})
-			return
-		}
-		if end > total {
-			end = total
-		}
-		// Slice is [start-1, end) in 0-based indexing.
-		json.NewEncoder(w).Encode(response{Lines: all[start-1 : end], TotalLines: total})
-	}
-}
-
 // maxFileContentsSize is a hard safety cap on the blob size served by
 // handleFile. It is deliberately generous: @pierre/diffs stops tokenizing a
 // file after ~100k characters, so anything beyond a few MB adds latency and
@@ -738,34 +654,9 @@ func readBlobForSide(ctx context.Context, dir, commit, side, path string) ([]byt
 }
 
 // isSafeRelPath rejects absolute paths and paths containing ".." segments so
-// the blob-lines endpoint cannot read arbitrary files outside the workspace.
+// the file endpoint cannot read arbitrary files outside the workspace.
 func isSafeRelPath(p string) bool {
-	if p == "" || filepath.IsAbs(p) {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return false
-	}
-	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
-		if part == ".." {
-			return false
-		}
-	}
-	return true
-}
-
-// splitLines splits text on "\n" without producing a trailing empty element
-// when the input ends with a newline — matching how unified diffs index lines.
-func splitLines(b []byte) []string {
-	s := string(b)
-	if s == "" {
-		return nil
-	}
-	if strings.HasSuffix(s, "\n") {
-		s = s[:len(s)-1]
-	}
-	return strings.Split(s, "\n")
+	return filepath.IsLocal(p)
 }
 
 func handleSPA() http.HandlerFunc {

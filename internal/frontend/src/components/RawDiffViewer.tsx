@@ -1,10 +1,13 @@
+import { memo, useCallback } from "react";
 import type { CommentThread, DiffFile } from "../types";
-import { FileHeader } from "./FileHeader";
+import { FileCard } from "./FileCard";
 
 interface RawDiffViewerProps {
   file: DiffFile;
   collapsed: boolean;
-  onToggleCollapsed: () => void;
+  // Receives the file path so App can pass one stable callback to every
+  // viewer; see PierreDiffViewer for the memo() rationale.
+  onToggleCollapsed: (path: string) => void;
   threads: CommentThread[];
 }
 
@@ -24,29 +27,25 @@ const LINE_CLASS: Record<string, string> = {
 // the patch parse did not account for. It renders the Go-parsed `chunks` as
 // plain monospace text — no highlighting, no comments, no context expansion —
 // so a diff never silently shows nothing.
-export function RawDiffViewer({
+export const RawDiffViewer = memo(function RawDiffViewer({
   file,
   collapsed,
   onToggleCollapsed,
   threads,
 }: RawDiffViewerProps) {
-  return (
-    <div
-      id={`file-${encodeURIComponent(file.path)}`}
-      className="border border-gh-border rounded-md mb-4 overflow-hidden"
-    >
-      <FileHeader
-        file={file}
-        collapsed={collapsed}
-        onToggleCollapsed={onToggleCollapsed}
-        threadCount={threads.length}
-      />
+  const toggleCollapsed = useCallback(
+    () => onToggleCollapsed(file.path),
+    [onToggleCollapsed, file.path],
+  );
 
-      {collapsed ? null : file.isBinary ? (
-        <div className="px-4 py-3 text-gh-text-muted text-sm italic">
-          Binary file not shown
-        </div>
-      ) : file.chunks.length === 0 ? (
+  return (
+    <FileCard
+      file={file}
+      collapsed={collapsed}
+      onToggleCollapsed={toggleCollapsed}
+      threadCount={threads.length}
+    >
+      {file.chunks.length === 0 ? (
         <div className="px-4 py-3 text-gh-text-muted text-sm italic">
           No content to display
         </div>
@@ -68,6 +67,6 @@ export function RawDiffViewer({
           </pre>
         </div>
       )}
-    </div>
+    </FileCard>
   );
-}
+});

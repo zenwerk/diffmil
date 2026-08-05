@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -13,6 +14,19 @@ type DiffResponse struct {
 	// Patch holds the full raw unified diff text, kept so it can be handed to
 	// @pierre/diffs's parsePatchFiles on the frontend.
 	Patch string `json:"patch,omitempty"`
+}
+
+// ParsePatch parses a raw unified diff into a DiffResponse, keeping the raw
+// text in Patch. Every DiffResponse built from a patch must go through here so
+// the "Patch always carries the full raw diff" invariant lives in one place.
+func ParsePatch(raw []byte) (*DiffResponse, error) {
+	files, _, err := gitdiff.Parse(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	resp := FromGitDiff(files)
+	resp.Patch = string(raw)
+	return resp, nil
 }
 
 // DiffFile represents a single file in the diff.

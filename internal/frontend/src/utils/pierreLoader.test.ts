@@ -17,13 +17,6 @@ function makeFileDiff(overrides: Partial<FileDiffMetadata>): FileDiffMetadata {
 }
 
 describe("buildDiffFilesLoader", () => {
-  it("returns undefined when no workspaceId is provided", () => {
-    const fetcher = vi.fn();
-    const loader = buildDiffFilesLoader({ fetcher });
-    expect(loader).toBeUndefined();
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
   it("fetches both sides for a 'change' diff and returns them", async () => {
     const fetcher = vi.fn(async (params: { side: "old" | "new"; path: string }) =>
       params.side === "old" ? "old contents" : "new contents",
