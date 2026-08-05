@@ -7,5 +7,6 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #4188 | 12:01 PM | 🟣 | Enabled Fira Code Variable font with programming ligatures for code display | ~98 |
+| #4160 | 12:43 AM | 🔄 | Added langVersion to DiffViewer useHighlighter destructuring | ~214 |
+| #4140 | 12:29 AM | 🟣 | Added hover state colors for diff lines | ~271 |
 </claude-mem-context>
