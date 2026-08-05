@@ -565,12 +565,18 @@ func buildConfig(ctx context.Context, args []string) (server.Config, error) {
 		return cfg, err
 	}
 
-	files, _, err := gitdiff.Parse(reader)
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		return cfg, fmt.Errorf("failed to read diff: %w", err)
+	}
+
+	files, _, err := gitdiff.Parse(bytes.NewReader(raw))
 	if err != nil {
 		return cfg, fmt.Errorf("failed to parse diff: %w", err)
 	}
 
 	cfg.InitialDiff = diff.FromGitDiff(files)
+	cfg.InitialDiff.Patch = string(raw)
 	return cfg, nil
 }
 

@@ -418,3 +418,336 @@ func TestPostDiffRequiresWorkspace(t *testing.T) {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
+
+func TestIsSafeRelPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"/etc/passwd", false},
+		{"../etc/passwd", false},
+		{"a/../../etc/passwd", false},
+		{"a/b.txt", true},
+		{"src/main.go", true},
+		{"a/./b.txt", true},
+	}
+	for _, c := range cases {
+		if got := isSafeRelPath(c.in); got != c.want {
+			t.Errorf("isSafeRelPath(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestBlobLinesReturnsFileLines(t *testing.T) {
+	dir := makeGitRepo(t)
+	// Replace README.md with a multi-line file and commit so HEAD has known
+	// content for blob-lines to read.
+	content := "L1\nL2\nL3\nL4\nL5\n"
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("add", "README.md")
+	run("commit", "-q", "-m", "expand")
+
+	srv, _ := newTestServer(t, Config{RepoDir: dir})
+
+	// Discover the workspace id assigned to the initial RepoDir.
+	wsResp, err := http.Get(srv.URL + "/_/api/workspaces")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workspaces []Workspace
+	json.NewDecoder(wsResp.Body).Decode(&workspaces)
+	wsResp.Body.Close()
+	if len(workspaces) != 1 {
+		t.Fatalf("got %d workspaces, want 1", len(workspaces))
+	}
+	wsID := workspaces[0].ID
+
+	q := "?ws=" + wsID + "&commit=" + workingTreeHash + "&path=README.md&side=new&start=2&end=4"
+	resp, err := http.Get(srv.URL + "/_/api/blob-lines" + q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		Lines      []string `json:"lines"`
+		TotalLines int      `json:"totalLines"`
+	}
+	json.NewDecoder(resp.Body).Decode(&got)
+	if want := []string{"L2", "L3", "L4"}; !slicesEqual(got.Lines, want) {
+		t.Errorf("lines = %v, want %v", got.Lines, want)
+	}
+	if got.TotalLines != 5 {
+		t.Errorf("totalLines = %d, want 5", got.TotalLines)
+	}
+}
+
+func TestBlobLinesRejectsTraversal(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, _ := newTestServer(t, Config{RepoDir: dir})
+	wsResp, _ := http.Get(srv.URL + "/_/api/workspaces")
+	var workspaces []Workspace
+	json.NewDecoder(wsResp.Body).Decode(&workspaces)
+	wsResp.Body.Close()
+	wsID := workspaces[0].ID
+
+	q := "?ws=" + wsID + "&commit=working&path=../etc/passwd&side=new&start=1&end=1"
+	resp, err := http.Get(srv.URL + "/_/api/blob-lines" + q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestGetDiffWithCommitIncludesPatch(t *testing.T) {
+	dir := makeGitRepo(t)
+	content := "L1\nL2\nL3\n"
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("add", "README.md")
+	run("commit", "-q", "-m", "expand")
+
+	// Compute the expected raw patch the same way the server does, via
+	// `git diff-tree -p` for HEAD.
+	cmd := exec.Command("git", "diff-tree", "-p", "--no-ext-diff", "--color=never", "-r", "--root", "HEAD")
+	cmd.Dir = dir
+	wantPatch, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	resp, err := http.Get(srv.URL + "/_/api/diff?ws=" + wsID + "&commit=HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got diff.DiffResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Patch != string(wantPatch) {
+		t.Errorf("Patch = %q, want %q", got.Patch, string(wantPatch))
+	}
+}
+
+func TestPostDiffRoundTripsPatch(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	want := &diff.DiffResponse{
+		Files: []diff.DiffFile{{Path: "a.txt"}},
+		Patch: "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n",
+	}
+	body, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(srv.URL+"/_/api/diff?ws="+wsID, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200", resp.StatusCode)
+	}
+
+	getResp, err := http.Get(srv.URL + "/_/api/diff?ws=" + wsID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer getResp.Body.Close()
+	var got diff.DiffResponse
+	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Patch != want.Patch {
+		t.Errorf("Patch = %q, want %q", got.Patch, want.Patch)
+	}
+}
+
+func TestFileReturnsContentsForBothSides(t *testing.T) {
+	dir := makeGitRepo(t)
+	oldContent := "old line\n"
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(oldContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("add", "README.md")
+	run("commit", "-q", "-m", "old content")
+
+	newContent := "new line\n"
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(newContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	// New side, working tree: reads directly from the working copy.
+	resp, err := http.Get(srv.URL + "/_/api/file?ws=" + wsID + "&commit=" + workingTreeHash + "&path=README.md&side=new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotNew struct {
+		Contents *string `json:"contents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&gotNew); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if gotNew.Contents == nil || *gotNew.Contents != newContent {
+		t.Errorf("new side contents = %v, want %q", gotNew.Contents, newContent)
+	}
+
+	// Old side, working tree: reads from HEAD.
+	resp, err = http.Get(srv.URL + "/_/api/file?ws=" + wsID + "&commit=" + workingTreeHash + "&path=README.md&side=old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotOld struct {
+		Contents *string `json:"contents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&gotOld); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if gotOld.Contents == nil || *gotOld.Contents != oldContent {
+		t.Errorf("old side contents = %v, want %q", gotOld.Contents, oldContent)
+	}
+}
+
+func TestFileReturnsNullContentsForMissingFile(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	resp, err := http.Get(srv.URL + "/_/api/file?ws=" + wsID + "&commit=" + workingTreeHash + "&path=does-not-exist.txt&side=new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		Contents *string `json:"contents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Contents != nil {
+		t.Errorf("Contents = %v, want nil", got.Contents)
+	}
+}
+
+func TestFileRejectsPathTraversal(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	resp, err := http.Get(srv.URL + "/_/api/file?ws=" + wsID + "&commit=" + workingTreeHash + "&path=../etc/passwd&side=new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestFileRejectsInvalidSide(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	resp, err := http.Get(srv.URL + "/_/api/file?ws=" + wsID + "&commit=" + workingTreeHash + "&path=README.md&side=sideways")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestFileRejectsMissingWorkspace(t *testing.T) {
+	srv, _ := newTestServer(t, Config{})
+
+	resp, err := http.Get(srv.URL + "/_/api/file?path=README.md&side=new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

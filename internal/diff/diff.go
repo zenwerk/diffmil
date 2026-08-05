@@ -10,6 +10,9 @@ import (
 // DiffResponse is the top-level API response containing all diff files.
 type DiffResponse struct {
 	Files []DiffFile `json:"files"`
+	// Patch holds the full raw unified diff text, kept so it can be handed to
+	// @pierre/diffs's parsePatchFiles on the frontend.
+	Patch string `json:"patch,omitempty"`
 }
 
 // DiffFile represents a single file in the diff.

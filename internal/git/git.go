@@ -19,9 +19,16 @@ type Commit struct {
 	Tags    []string `json:"tags,omitempty"`
 }
 
+// stdPrefixConfig pins the standard `a/`/`b/` diff path prefixes regardless
+// of user git config. Users with diff.mnemonicPrefix (c/, w/, i/ prefixes) or
+// diff.noprefix would otherwise produce patches that @pierre/diffs's patch
+// parser on the frontend cannot match back to file paths.
+var stdPrefixConfig = []string{"-c", "diff.mnemonicprefix=false", "-c", "diff.noprefix=false"}
+
 // Diff runs `git diff` with the given arguments and returns the output as an io.Reader.
 func Diff(ctx context.Context, dir string, args []string) (io.Reader, error) {
-	cmdArgs := []string{"diff", "--no-ext-diff", "--color=never"}
+	cmdArgs := append([]string{}, stdPrefixConfig...)
+	cmdArgs = append(cmdArgs, "diff", "--no-ext-diff", "--color=never")
 	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
@@ -36,7 +43,9 @@ func Diff(ctx context.Context, dir string, args []string) (io.Reader, error) {
 
 // DiffShow runs `git diff-tree -p` for a single commit to get its diff.
 func DiffShow(ctx context.Context, dir string, hash string) (io.Reader, error) {
-	cmd := exec.CommandContext(ctx, "git", "diff-tree", "-p", "--no-ext-diff", "--color=never", "-r", "--root", hash)
+	cmdArgs := append([]string{}, stdPrefixConfig...)
+	cmdArgs = append(cmdArgs, "diff-tree", "-p", "--no-ext-diff", "--color=never", "-r", "--root", hash)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 	cmd.Dir = dir
 
 	out, err := cmd.Output()
@@ -131,7 +140,9 @@ func HasUncommittedChanges(ctx context.Context, dir string) bool {
 
 // DiffUncommitted returns the diff of uncommitted changes against HEAD.
 func DiffUncommitted(ctx context.Context, dir string) (io.Reader, error) {
-	cmd := exec.CommandContext(ctx, "git", "diff", "--no-ext-diff", "--color=never", "HEAD")
+	cmdArgs := append([]string{}, stdPrefixConfig...)
+	cmdArgs = append(cmdArgs, "diff", "--no-ext-diff", "--color=never", "HEAD")
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 	cmd.Dir = dir
 
 	out, err := cmd.Output()
@@ -148,3 +159,20 @@ func IsGitRepo(dir string) bool {
 	return cmd.Run() == nil
 }
 
+// ShowBlob returns the full contents of <ref>:<path> via `git show`.
+// ref may be a commit hash or any rev (e.g. "HEAD", "HEAD^").
+// Returns (nil, nil) when the object does not exist (e.g. file added in the
+// commit so HEAD^:<path> is absent) so callers can treat "no blob" as a
+// non-error condition.
+func ShowBlob(ctx context.Context, dir string, ref string, path string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", "show", ref+":"+path)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return out, nil
+}
