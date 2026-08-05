@@ -56,7 +56,13 @@ interface ThemeContextValue {
   mode: ThemeMode;
   setMode: (mode: ThemeMode) => void;
   resolved: ResolvedTheme;
+  // The Shiki theme for the currently-resolved appearance.
   shikiTheme: string;
+  // Both remembered Shiki themes. Renderers that resolve light/dark
+  // themselves (e.g. @pierre/diffs, which takes a {dark, light} pair) need
+  // the inactive one too, not just the resolved `shikiTheme`.
+  darkShikiTheme: string;
+  lightShikiTheme: string;
   setShikiTheme: (id: string) => void;
 }
 
@@ -123,7 +129,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   return createElement(
     ThemeContext.Provider,
-    { value: { mode, setMode, resolved, shikiTheme, setShikiTheme } },
+    {
+      value: {
+        mode,
+        setMode,
+        resolved,
+        shikiTheme,
+        darkShikiTheme: darkShiki,
+        lightShikiTheme: lightShiki,
+        setShikiTheme,
+      },
+    },
     children,
   );
 }

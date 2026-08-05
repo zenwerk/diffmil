@@ -1,5 +1,11 @@
 export interface DiffResponse {
   files: DiffFile[];
+  // Raw unified diff text for the whole response, and the sole input to the
+  // @pierre/diffs renderer. Sent by the server as `patch` (omitempty), so it
+  // is absent for responses produced before the field existed — e.g. a cached
+  // POST payload. Consumers must fall back to RawDiffViewer (which reads
+  // `files[].chunks`) when it is missing.
+  patch?: string;
 }
 
 export interface DiffFile {

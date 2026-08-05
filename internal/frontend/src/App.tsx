@@ -9,18 +9,21 @@ import {
   Trash2,
   GitBranch,
 } from "lucide-react";
+import { Virtualizer } from "@pierre/diffs/react";
+import type { VirtualFileMetrics } from "@pierre/diffs";
 import type { CommentThread, DiffResponse, Commit, DiffViewMode } from "./types";
 import { CommitList } from "./components/CommitList";
 import { FileList } from "./components/FileList";
-import { DiffViewer } from "./components/DiffViewer";
+import { RawDiffViewer } from "./components/RawDiffViewer";
+import { PierreDiffViewer } from "./components/PierreDiffViewer";
+import { PierreWorkerPool } from "./components/PierreWorkerPool";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ShikiThemePicker } from "./components/ShikiThemePicker";
 import { MonoFontPicker } from "./components/MonoFontPicker";
 import { ViewModeToggle } from "./components/ViewModeToggle";
 import { Toast } from "./components/Toast";
 import { KeyboardShortcutsHelp } from "./components/KeyboardShortcutsHelp";
-import { HighlighterProvider } from "./hooks/useHighlighter";
-import { useTheme, ThemeProvider } from "./hooks/useTheme";
+import { ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
@@ -33,8 +36,11 @@ import {
   pruneOrphanWorkspaceComments,
 } from "./hooks/useComments";
 import { useWorkspaces } from "./hooks/useWorkspaces";
+import { useMonoFont } from "./hooks/useMonoFont";
+import { getMonoFontById } from "./constants/monoFonts";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { copyToClipboard, formatAllThreadsPrompt, toCommitContext } from "./utils/commentPrompt";
+import { buildFileDiffMap, findFileDiff, patchCacheKeyPrefix } from "./utils/pierrePatch";
 
 const EMPTY_THREADS: CommentThread[] = [];
 
@@ -257,7 +263,63 @@ function AppContent() {
       return next;
     });
   }, []);
-  const { shikiTheme } = useTheme();
+  const { fontId } = useMonoFont();
+
+  // The @pierre/diffs metadata is mutated in place as context is expanded, so
+  // it must be parsed exactly once per patch and the same object identities
+  // reused on every render. Keyed on the patch text alone for that reason.
+  const pierreFileDiffs = useMemo(() => {
+    const patch = diffData?.patch;
+    if (!patch) {
+      if (diffData != null && (diffData.files?.length ?? 0) > 0) {
+        console.warn(
+          "diffmil: the diff response carries no `patch` (likely a cached response " +
+            "predating the field); rendering it as raw text.",
+        );
+      }
+      return null;
+    }
+    // The content-derived cache key prefix is what keeps two diffs of the
+    // same file path (working tree vs a commit) from colliding in the
+    // library's render cache — see patchCacheKeyPrefix.
+    return buildFileDiffMap(patch, patchCacheKeyPrefix("patch", patch));
+  }, [diffData]);
+
+  const monoFont = getMonoFontById(fontId);
+  // @pierre/diffs renders inside a shadow root, which blocks page CSS but
+  // still inherits custom properties, so its typography is configured by
+  // setting these variables on an ancestor.
+  const diffsFontVars = useMemo(
+    () =>
+      ({
+        "--diffs-font-family": monoFont?.family ?? "ui-monospace",
+        "--diffs-font-size": `${diffFontSize}px`,
+        "--diffs-line-height": `${Math.round(diffFontSize * 1.5)}px`,
+        "--diffs-font-features": monoFont?.ligatures
+          ? '"liga" 1, "calt" 1'
+          : "normal",
+      }) as React.CSSProperties,
+    [monoFont, diffFontSize],
+  );
+
+  // Height estimates the Virtualizer uses to size a file's placeholder before
+  // it is rendered and measured. They must track diffmil's real layout or the
+  // scroll bar jumps as files hydrate:
+  //   - lineHeight matches --diffs-line-height above.
+  //   - diffHeaderHeight covers our own <FileHeader>: px-4 py-2 (8px top +
+  //     8px bottom) around a text-sm/leading-5 row, plus the 1px bottom
+  //     border = 37px. (The library's own header is disabled.)
+  //   - spacing is the mb-4 gap between file cards.
+  const diffMetrics = useMemo<VirtualFileMetrics>(
+    () => ({
+      hunkLineCount: 50,
+      lineHeight: Math.round(diffFontSize * 1.5),
+      diffHeaderHeight: 37,
+      spacing: 16,
+    }),
+    [diffFontSize],
+  );
+
   const commitPanel = usePanelResize("diffmil.commitsPanelWidth", 300, 160, 600, "right");
   const filePanel = usePanelResize("diffmil.filesPanelWidth", 240, 140, 500, "left");
 
@@ -725,11 +787,19 @@ function AppContent() {
           )
         )}
 
+        {/*
+          `main` stays the focus target and the owner of diff typography, but
+          it is no longer the scroller: the React <Virtualizer> renders its own
+          scroll root and content wrapper (it takes no ref/id/tabIndex), so
+          `main` becomes an overflow-hidden flex box and the Virtualizer fills
+          it. Focus therefore stays on `main` — Esc Esc still lands here and
+          arrow/Page keys scroll the descendant scroller as usual.
+        */}
         <main
           ref={mainRef}
           tabIndex={-1}
-          className="flex-1 overflow-y-auto p-4 outline-none"
-          style={{ fontSize: diffFontSize }}
+          className="flex-1 min-w-0 flex flex-col overflow-hidden outline-none"
+          style={{ fontSize: diffFontSize, ...diffsFontVars }}
         >
           {diffLoading ? (
             <div className="flex items-center justify-center h-full text-gh-text-muted">
@@ -742,22 +812,55 @@ function AppContent() {
                 : "No changes to display"}
             </div>
           ) : (
-            files.map((file) => (
-              <DiffViewer
-                key={file.path}
-                file={file}
-                shikiTheme={shikiTheme}
-                viewMode={viewMode}
-                collapsed={collapsedFiles.has(file.path)}
-                onToggleCollapsed={() => toggleFileCollapsed(file.path)}
-                threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
-                commitContext={commitContext}
-                onAddComment={addThread}
-                onUpdateComment={updateMessage}
-                onRemoveComment={removeThread}
-                onCommentCopied={handleCommentCopied}
-              />
-            ))
+            <Virtualizer
+              // Remounting per commit would be wasteful, but a stale scroll
+              // offset into a completely different file list is worse: keying
+              // on the diff identity gives each diff a fresh scroll root at 0.
+              key={selectedCommit ?? "working-tree"}
+              className="flex-1 overflow-y-auto"
+              // The padding lives on the inner content wrapper, not the scroll
+              // root: the virtualizer tracks content size by observing that
+              // wrapper's border box, so padding placed outside it would be
+              // missing from every scroll-height estimate.
+              contentClassName="p-4"
+            >
+              {files.map((file) => {
+                const shared = {
+                  file,
+                  collapsed: collapsedFiles.has(file.path),
+                  onToggleCollapsed: () => toggleFileCollapsed(file.path),
+                  threads: threadsByFile.get(file.path) ?? EMPTY_THREADS,
+                };
+                const fileDiff = pierreFileDiffs
+                  ? findFileDiff(pierreFileDiffs, file.path, file.oldPath)
+                  : undefined;
+                // Any file the patch parse did not account for degrades on its
+                // own to the raw text view, so one unmatched path cannot blank
+                // out the rest of the diff.
+                if (pierreFileDiffs && !fileDiff) {
+                  console.warn(
+                    `diffmil: no @pierre/diffs metadata for "${file.path}"; rendering it as raw text.`,
+                  );
+                }
+                return fileDiff ? (
+                  <PierreDiffViewer
+                    key={file.path}
+                    {...shared}
+                    fileDiff={fileDiff}
+                    metrics={diffMetrics}
+                    viewMode={viewMode}
+                    commitContext={commitContext}
+                    workspaceId={wsId ?? undefined}
+                    onAddComment={addThread}
+                    onUpdateComment={updateMessage}
+                    onRemoveComment={removeThread}
+                    onCommentCopied={handleCommentCopied}
+                  />
+                ) : (
+                  <RawDiffViewer key={file.path} {...shared} />
+                );
+              })}
+            </Virtualizer>
           )}
         </main>
 
@@ -800,12 +903,15 @@ function AppContent() {
   );
 }
 
+// The worker pool is mounted outside AppContent so the pool (and its workers)
+// live for the whole session rather than being torn down whenever the diff
+// data changes.
 export function App() {
   return (
     <ThemeProvider>
-      <HighlighterProvider>
+      <PierreWorkerPool>
         <AppContent />
-      </HighlighterProvider>
+      </PierreWorkerPool>
     </ThemeProvider>
   );
 }

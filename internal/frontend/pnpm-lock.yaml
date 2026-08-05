@@ -26,6 +26,9 @@ importers:
       '@fontsource/monaspace-neon':
         specifier: ^5.2.5
         version: 5.2.5
+      '@pierre/diffs':
+        specifier: ~1.3.3
+        version: 1.3.3(@shikijs/themes@4.0.2)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       lucide-react:
         specifier: ^1.8.0
         version: 1.8.0(react@19.2.5)
@@ -35,9 +38,6 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.2.5(react@19.2.5)
-      shiki:
-        specifier: ^4.0.2
-        version: 4.0.2
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.2.2
@@ -212,6 +212,36 @@ packages:
   '@oxc-project/types@0.124.0':
     resolution: {integrity: sha512-VBFWMTBvHxS11Z5Lvlr3IWgrwhMTXV+Md+EQF0Xf60+wAdsGFTBx7X7K/hP4pi8N7dcm1RvcHwDxZ16Qx8keUg==}
 
+  '@pierre/diffs@1.3.3':
+    resolution: {integrity: sha512-LPoRv3vkfhrZbdRe/aPhJFjD1XK2JD9ALAdvral6ThG3qAcMDSytGbAXk3WQlt5+AZDOQXflHQwBWhw+89Ttzg==}
+    peerDependencies:
+      react: ^18.3.1 || ^19.0.0
+      react-dom: ^18.3.1 || ^19.0.0
+
+  '@pierre/theme@2.0.0':
+    resolution: {integrity: sha512-yNDd9GYLQl1mEUJR8AneJ5e4ohLIHQd/wZLWr4fagt78vS2RwwZNW530vVgHqXFAyFVcFlRmGUD5ramXH46OXw==}
+    engines: {vscode: ^1.0.0}
+
+  '@pierre/theming@1.0.0':
+    resolution: {integrity: sha512-WsdrnhKfjeyXGDikZmN9pkpeZ5S/cl6EE72feiSc0tlynT1tMYqXqouhuv/foK+PY9OEnebOAVRQn3+rAstR8g==}
+    peerDependencies:
+      '@pierre/theme': ^1.1.0
+      '@shikijs/themes': ^3.0.0 || ^4.0.0
+      react: ^18.3.1 || ^19.0.0
+      react-dom: ^18.3.1 || ^19.0.0
+      shiki: ^3.0.0 || ^4.0.0
+    peerDependenciesMeta:
+      '@pierre/theme':
+        optional: true
+      '@shikijs/themes':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
+      shiki:
+        optional: true
+
   '@rolldown/binding-android-arm64@1.0.0-rc.15':
     resolution: {integrity: sha512-YYe6aWruPZDtHNpwu7+qAHEMbQ/yRl6atqb/AhznLTnD3UY99Q1jE7ihLSahNWkF4EqRPVC4SiR4O0UkLK02tA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -311,6 +341,10 @@ packages:
     resolution: {integrity: sha512-hxT0YF4ExEqB8G/qFdtJvpmHXBYJ2lWW7qTHDarVkIudPFE6iCIrqdgWxGn5s+ppkGXI0aEGlibI0PAyzP3zlw==}
     engines: {node: '>=20'}
 
+  '@shikijs/core@4.4.2':
+    resolution: {integrity: sha512-StyzbAyxg2/tBGf78gwbBkGyeQ73lf8UiJArFaQhTQIDqQOCKPCQFanvrs4/Yv3Yfyc+ONInJM6K+FMIf+P+kA==}
+    engines: {node: '>=20'}
+
   '@shikijs/engine-javascript@4.0.2':
     resolution: {integrity: sha512-7PW0Nm49DcoUIQEXlJhNNBHyoGMjalRETTCcjMqEaMoJRLljy1Bi/EGV3/qLBgLKQejdspiiYuHGQW6dX94Nag==}
     engines: {node: '>=20'}
@@ -327,12 +361,24 @@ packages:
     resolution: {integrity: sha512-M6UMPrSa3fN5ayeJwFVl9qWofl273wtK1VG8ySDZ1mQBfhCpdd8nEx7nPZ/tk7k+TYcpqBZzj/AnwxT9lO+HJw==}
     engines: {node: '>=20'}
 
+  '@shikijs/primitive@4.4.2':
+    resolution: {integrity: sha512-l6fQQKsOMlz72n38fztmSgZ76MO6KSWuw8o+GJ+FhmqrpC9pIOJNQNXGgbb5yX2AwpzlEHwsaLPnk/8o4Fm+rA==}
+    engines: {node: '>=20'}
+
   '@shikijs/themes@4.0.2':
     resolution: {integrity: sha512-mjCafwt8lJJaVSsQvNVrJumbnnj1RI8jbUKrPKgE6E3OvQKxnuRoBaYC51H4IGHePsGN/QtALglWBU7DoKDFnA==}
     engines: {node: '>=20'}
 
+  '@shikijs/transformers@4.4.2':
+    resolution: {integrity: sha512-d81PJ9KkR1tVP95FH/9296HTtDo0mh76wv10u9T1YmsZq/UcXgt0OLdBszfUQ1i+umkRMCjDnFbFZU7/tCODTQ==}
+    engines: {node: '>=20'}
+
   '@shikijs/types@4.0.2':
     resolution: {integrity: sha512-qzbeRooUTPnLE+sHD/Z8DStmaDgnbbc/pMrU203950aRqjX/6AFHeDYT+j00y2lPdz0ywJKx7o/7qnqTivtlXg==}
+    engines: {node: '>=20'}
+
+  '@shikijs/types@4.4.2':
+    resolution: {integrity: sha512-PFYitV4vpDr/iPCIhnHp+Q4ftic5N5VeNJ3KQ1O8gn3h2ar8qgwMAXF7tq4m1CWaMS60fV4VqF6vfnWH4F7vqQ==}
     engines: {node: '>=20'}
 
   '@shikijs/vscode-textmate@10.0.2':
@@ -478,6 +524,9 @@ packages:
   '@types/hast@3.0.4':
     resolution: {integrity: sha512-WPs+bbQw5aCj+x6laNGWLH3wviHtoCv/P3+otBhbOhJgG8qtpdAMlTCxLtsTWA7LH1Oh/bFCHsBn0TPS5m30EQ==}
 
+  '@types/hast@3.0.5':
+    resolution: {integrity: sha512-rp/ezSWaD1m44dPKICGhiskI13nVr7qTloFwDa/IYkhhf5nzwP+zIQcIJh3WIFSBOy/H1PzB40jPjMDksN4F+g==}
+
   '@types/mdast@4.0.4':
     resolution: {integrity: sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA==}
 
@@ -494,6 +543,7 @@ packages:
 
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
+    deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
   '@vitejs/plugin-react@6.0.1':
     resolution: {integrity: sha512-l9X/E3cDb+xY3SWzlG1MOGt2usfEHGMNIaegaUGFsLkb3RCn/k8/TOXBcab+OndDI4TBtktT8/9BwwW8Vi9KUQ==}
@@ -605,6 +655,10 @@ packages:
 
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
+
+  diff@9.0.0:
+    resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
+    engines: {node: '>=0.3.1'}
 
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
@@ -756,6 +810,9 @@ packages:
   lru-cache@11.3.6:
     resolution: {integrity: sha512-Gf/KoL3C/MlI7Bt0PGI9I+TeTC/I6r/csU58N4BSNc4lppLBeKsOdFYkK+dX0ABDUMJNfCHTyPpzwwO21Awd3A==}
     engines: {node: 20 || >=22}
+
+  lru_map@0.4.1:
+    resolution: {integrity: sha512-I+lBvqMMFfqaV8CJCISjI3wbjmwVu/VyOoU7+qtu9d7ioW5klMgsTTiUOUp+DJvfTTzKXoPbyC6YfgkNcyPSOg==}
 
   lucide-react@1.8.0:
     resolution: {integrity: sha512-WuvlsjngSk7TnTBJ1hsCy3ql9V9VOdcPkd3PKcSmM34vJD8KG6molxz7m7zbYFgICwsanQWmJ13JlYs4Zp7Arw==}
@@ -1215,6 +1272,30 @@ snapshots:
 
   '@oxc-project/types@0.124.0': {}
 
+  '@pierre/diffs@1.3.3(@shikijs/themes@4.0.2)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
+    dependencies:
+      '@pierre/theme': 2.0.0
+      '@pierre/theming': 1.0.0(@pierre/theme@2.0.0)(@shikijs/themes@4.0.2)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(shiki@4.0.2)
+      '@shikijs/transformers': 4.4.2
+      diff: 9.0.0
+      hast-util-to-html: 9.0.5
+      lru_map: 0.4.1
+      react: 19.2.5
+      react-dom: 19.2.5(react@19.2.5)
+      shiki: 4.0.2
+    transitivePeerDependencies:
+      - '@shikijs/themes'
+
+  '@pierre/theme@2.0.0': {}
+
+  '@pierre/theming@1.0.0(@pierre/theme@2.0.0)(@shikijs/themes@4.0.2)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(shiki@4.0.2)':
+    optionalDependencies:
+      '@pierre/theme': 2.0.0
+      '@shikijs/themes': 4.0.2
+      react: 19.2.5
+      react-dom: 19.2.5(react@19.2.5)
+      shiki: 4.0.2
+
   '@rolldown/binding-android-arm64@1.0.0-rc.15':
     optional: true
 
@@ -1276,6 +1357,14 @@ snapshots:
       '@types/hast': 3.0.4
       hast-util-to-html: 9.0.5
 
+  '@shikijs/core@4.4.2':
+    dependencies:
+      '@shikijs/primitive': 4.4.2
+      '@shikijs/types': 4.4.2
+      '@shikijs/vscode-textmate': 10.0.2
+      '@types/hast': 3.0.5
+      hast-util-to-html: 9.0.5
+
   '@shikijs/engine-javascript@4.0.2':
     dependencies:
       '@shikijs/types': 4.0.2
@@ -1297,14 +1386,30 @@ snapshots:
       '@shikijs/vscode-textmate': 10.0.2
       '@types/hast': 3.0.4
 
+  '@shikijs/primitive@4.4.2':
+    dependencies:
+      '@shikijs/types': 4.4.2
+      '@shikijs/vscode-textmate': 10.0.2
+      '@types/hast': 3.0.5
+
   '@shikijs/themes@4.0.2':
     dependencies:
       '@shikijs/types': 4.0.2
+
+  '@shikijs/transformers@4.4.2':
+    dependencies:
+      '@shikijs/core': 4.4.2
+      '@shikijs/types': 4.4.2
 
   '@shikijs/types@4.0.2':
     dependencies:
       '@shikijs/vscode-textmate': 10.0.2
       '@types/hast': 3.0.4
+
+  '@shikijs/types@4.4.2':
+    dependencies:
+      '@shikijs/vscode-textmate': 10.0.2
+      '@types/hast': 3.0.5
 
   '@shikijs/vscode-textmate@10.0.2': {}
 
@@ -1432,6 +1537,10 @@ snapshots:
     dependencies:
       '@types/unist': 3.0.3
 
+  '@types/hast@3.0.5':
+    dependencies:
+      '@types/unist': 3.0.3
+
   '@types/mdast@4.0.4':
     dependencies:
       '@types/unist': 3.0.3
@@ -1547,6 +1656,8 @@ snapshots:
   devlop@1.1.0:
     dependencies:
       dequal: 2.0.3
+
+  diff@9.0.0: {}
 
   dom-accessibility-api@0.5.16: {}
 
@@ -1686,6 +1797,8 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.32.0
 
   lru-cache@11.3.6: {}
+
+  lru_map@0.4.1: {}
 
   lucide-react@1.8.0(react@19.2.5):
     dependencies:
