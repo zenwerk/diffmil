@@ -110,17 +110,11 @@ Options:
 				log.Fatalf("failed to register workspace: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "diffmil: registered workspace %q on existing server at %s\n", ws.Label, url)
-			if !*noOpen {
-				browser.OpenURL(url + "?ws=" + ws.ID)
-			}
 		} else {
 			if err := postDiff(url, cfg.InitialDiff); err != nil {
 				log.Fatalf("failed to send diff to existing server: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "diffmil: sent diff to existing server at %s\n", url)
-			if !*noOpen {
-				browser.OpenURL(url)
-			}
 		}
 		return
 	}
