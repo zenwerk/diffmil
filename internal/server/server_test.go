@@ -659,3 +659,53 @@ func TestFileRejectsMissingWorkspace(t *testing.T) {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
+
+func TestGetDiffErrorIncludesDetail(t *testing.T) {
+	dir := makeGitRepo(t)
+	srv, state := newTestServer(t, Config{RepoDir: dir})
+	wsID := state.Workspaces()[0].ID
+
+	resp, err := http.Get(srv.URL + "/_/api/diff?ws=" + wsID + "&commit=deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+
+	var body struct {
+		Error  string `json:"error"`
+		Detail string `json:"detail"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if body.Error != "failed to get diff" {
+		t.Errorf("error = %q, want %q", body.Error, "failed to get diff")
+	}
+	// The detail must carry the underlying git failure (command + stderr).
+	if !strings.Contains(body.Detail, "deadbeef") {
+		t.Errorf("detail %q should mention the failing git command/object", body.Detail)
+	}
+}
+
+func TestStatusIncludesLogPath(t *testing.T) {
+	srv, _ := newTestServer(t, Config{LogPath: "/tmp/diffmil-test.log"})
+
+	resp, err := http.Get(srv.URL + "/_/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Log string `json:"log"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Log != "/tmp/diffmil-test.log" {
+		t.Errorf("log = %q, want %q", body.Log, "/tmp/diffmil-test.log")
+	}
+}

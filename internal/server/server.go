@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zenwerk/diffmil/internal/diff"
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
@@ -20,6 +21,10 @@ import (
 type Config struct {
 	RepoDir     string
 	InitialDiff *diff.DiffResponse
+	// LogPath is the server log file location, exposed via /_/api/status
+	// so `diffmil --status` can tell users where to look. Empty when file
+	// logging is disabled.
+	LogPath string
 }
 
 // State holds mutable server state protected by a mutex.
@@ -284,13 +289,70 @@ func New(cfg Config) (http.Handler, *State) {
 	mux.HandleFunc("POST /_/api/workspaces", handleAddWorkspace(state))
 	mux.HandleFunc("DELETE /_/api/workspaces/{id}", handleRemoveWorkspace(state))
 	mux.HandleFunc("PATCH /_/api/workspaces/{id}", handlePatchWorkspace(state))
-	mux.HandleFunc("GET /_/api/status", handleStatus())
+	mux.HandleFunc("GET /_/api/status", handleStatus(cfg.LogPath))
 	mux.HandleFunc("POST /_/api/shutdown", handleShutdown(state))
 	mux.HandleFunc("POST /_/api/restart", handleRestart(state))
 	mux.HandleFunc("GET /_/events", handleSSE(state))
 	mux.HandleFunc("GET /", handleSPA())
 
-	return mux, state
+	return withAccessLog(mux), state
+}
+
+// writeError logs the failure with request context and writes a structured
+// JSON error body: {"error": <stable short message>, "detail": <err.Error()>}.
+// The detail is what makes 500s diagnosable after the fact.
+func writeError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+	level := slog.LevelWarn
+	if status >= 500 {
+		level = slog.LevelError
+	}
+	slog.Log(r.Context(), level, msg,
+		"status", status, "method", r.Method, "path", r.URL.Path,
+		"query", r.URL.RawQuery, "error", err)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg, "detail": detail})
+}
+
+// statusRecorder captures the response status code for access logging.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// withAccessLog records method/path/query/status/duration for API requests.
+// SSE and static assets are passed through unwrapped: SSE needs the original
+// http.Flusher and static traffic would only add noise.
+func withAccessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/_/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rec, r)
+
+		level := slog.LevelDebug
+		switch {
+		case rec.status >= 500:
+			level = slog.LevelError
+		case rec.status >= 400:
+			level = slog.LevelWarn
+		}
+		slog.Log(r.Context(), level, "api request",
+			"method", r.Method, "path", r.URL.Path, "query", r.URL.RawQuery,
+			"status", rec.status, "duration", time.Since(start).String())
+	})
 }
 
 const workingTreeHash = "working"
@@ -322,13 +384,19 @@ func handleGetDiff(state *State) http.HandlerFunc {
 			raw, err = gitcmd.DiffShow(ctx, ws.Dir, commitHash)
 		}
 		if err != nil {
-			http.Error(w, `{"error":"failed to get diff"}`, http.StatusInternalServerError)
+			// A canceled request kills the git child process; the client
+			// is gone, so this is neither a 500 nor an error worth logging.
+			if ctx.Err() != nil {
+				slog.Debug("diff request canceled", "ws", ws.ID, "commit", commitHash)
+				return
+			}
+			writeError(w, r, http.StatusInternalServerError, "failed to get diff", err)
 			return
 		}
 
 		resp, err := diff.ParsePatch(raw)
 		if err != nil {
-			http.Error(w, `{"error":"failed to parse diff"}`, http.StatusInternalServerError)
+			writeError(w, r, http.StatusInternalServerError, "failed to parse diff", err)
 			return
 		}
 		json.NewEncoder(w).Encode(resp)
@@ -339,13 +407,13 @@ func handlePostDiff(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var resp diff.DiffResponse
 		if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
-			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "invalid JSON", err)
 			return
 		}
 		wsID := r.URL.Query().Get("ws")
 		ws := state.findWorkspace(wsID)
 		if ws == nil {
-			http.Error(w, `{"error":"no workspace"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "no workspace", nil)
 			return
 		}
 		state.SetDiff(ws.ID, &resp)
@@ -385,7 +453,11 @@ func handleCommits(state *State) http.HandlerFunc {
 		wg.Wait()
 
 		if logErr != nil {
-			http.Error(w, `{"error":"failed to get commits"}`, http.StatusInternalServerError)
+			if ctx.Err() != nil {
+				slog.Debug("commits request canceled", "ws", ws.ID)
+				return
+			}
+			writeError(w, r, http.StatusInternalServerError, "failed to get commits", logErr)
 			return
 		}
 
@@ -436,15 +508,15 @@ func handleAddWorkspace(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "invalid JSON", err)
 			return
 		}
 		if req.Dir == "" {
-			http.Error(w, `{"error":"dir is required"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "dir is required", nil)
 			return
 		}
 		if !gitcmd.IsGitRepo(req.Dir) {
-			http.Error(w, `{"error":"not a git repository"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "not a git repository", nil)
 			return
 		}
 		ws, _ := state.AddWorkspace(req.Dir)
@@ -457,7 +529,7 @@ func handleRemoveWorkspace(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
-			http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "id is required", nil)
 			return
 		}
 		switch state.RemoveWorkspace(id) {
@@ -465,9 +537,9 @@ func handleRemoveWorkspace(state *State) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"ok":true}`))
 		case RemoveLastWorkspace:
-			http.Error(w, `{"error":"cannot remove the last workspace"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "cannot remove the last workspace", nil)
 		case RemoveNotFound:
-			http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
+			writeError(w, r, http.StatusNotFound, "workspace not found", nil)
 		}
 	}
 }
@@ -479,21 +551,21 @@ func handlePatchWorkspace(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
-			http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "id is required", nil)
 			return
 		}
 		var req request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "invalid JSON", err)
 			return
 		}
 		if strings.TrimSpace(req.Label) == "" {
-			http.Error(w, `{"error":"label is required"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "label is required", nil)
 			return
 		}
 		ws := state.UpdateWorkspaceLabel(id, req.Label)
 		if ws == nil {
-			http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
+			writeError(w, r, http.StatusNotFound, "workspace not found", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -501,13 +573,14 @@ func handlePatchWorkspace(state *State) http.HandlerFunc {
 	}
 }
 
-func handleStatus() http.HandlerFunc {
+func handleStatus(logPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"app":    "diffmil",
 			"status": "ok",
 			"pid":    os.Getpid(),
+			"log":    logPath,
 		})
 	}
 }
@@ -542,7 +615,7 @@ func handleSSE(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			writeError(w, r, http.StatusInternalServerError, "streaming not supported", nil)
 			return
 		}
 
@@ -595,19 +668,19 @@ func handleFile(state *State) http.HandlerFunc {
 
 		ws := state.findWorkspace(q.Get("ws"))
 		if ws == nil || ws.Dir == "" {
-			http.Error(w, `{"error":"no workspace"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "no workspace", nil)
 			return
 		}
 
 		path := q.Get("path")
 		if !isSafeRelPath(path) {
-			http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "invalid path", nil)
 			return
 		}
 
 		side := q.Get("side")
 		if side != "old" && side != "new" {
-			http.Error(w, `{"error":"side must be old or new"}`, http.StatusBadRequest)
+			writeError(w, r, http.StatusBadRequest, "side must be old or new", nil)
 			return
 		}
 
@@ -615,7 +688,11 @@ func handleFile(state *State) http.HandlerFunc {
 
 		blob, err := readBlobForSide(r.Context(), ws.Dir, commit, side, path)
 		if err != nil {
-			http.Error(w, `{"error":"failed to read blob"}`, http.StatusInternalServerError)
+			if r.Context().Err() != nil {
+				slog.Debug("file request canceled", "ws", ws.ID, "path", path)
+				return
+			}
+			writeError(w, r, http.StatusInternalServerError, "failed to read blob", err)
 			return
 		}
 		if blob == nil || len(blob) > maxFileContentsSize {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"github.com/zenwerk/diffmil/internal/backup"
 	"github.com/zenwerk/diffmil/internal/diff"
 	gitcmd "github.com/zenwerk/diffmil/internal/git"
+	"github.com/zenwerk/diffmil/internal/logfile"
 	"github.com/zenwerk/diffmil/internal/mdns"
 	"github.com/zenwerk/diffmil/internal/pidfile"
 	"github.com/zenwerk/diffmil/internal/server"
@@ -69,7 +71,20 @@ Options:
 	all := flag.Bool("all", false, "apply to all running servers (with --shutdown or --status)")
 	enableMDNS := flag.Bool("mdns", false, "advertise <mdns-host>.local on the LAN via mDNS")
 	mdnsHost := flag.String("mdns-host", mdns.DefaultHostname, "mDNS hostname (without .local suffix)")
+	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, or error")
+	logFile := flag.String("log-file", "", "log file path (default: <state-dir>/log/diffmil-<port>.log)")
+	noLog := flag.Bool("no-log", false, "disable log file output")
 	flag.Parse()
+
+	opts := runOptions{
+		port:       *port,
+		noOpen:     *noOpen,
+		enableMDNS: *enableMDNS,
+		mdnsHost:   *mdnsHost,
+		logLevel:   *logLevel,
+		logFile:    *logFile,
+		noLog:      *noLog,
+	}
 
 	// Handle control commands
 	if *doStatus {
@@ -120,7 +135,7 @@ Options:
 	}
 
 	if !*foreground {
-		pid, err := spawnBackground(*port, *enableMDNS, *mdnsHost)
+		pid, err := spawnBackground(opts)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -140,7 +155,40 @@ Options:
 	}
 
 	// Foreground mode
-	runForeground(ctx, cancel, cfg, *port, *noOpen, *enableMDNS, *mdnsHost)
+	runForeground(ctx, cancel, cfg, opts)
+}
+
+// runOptions carries the server-mode CLI flags. Log settings must survive
+// both daemonization (spawnBackground) and self-restart, so everything here
+// is propagated to child-process args.
+type runOptions struct {
+	port       int
+	noOpen     bool
+	enableMDNS bool
+	mdnsHost   string
+	logLevel   string
+	logFile    string
+	noLog      bool
+}
+
+// serverArgs renders the options as CLI args for spawned server processes.
+func (o runOptions) serverArgs() []string {
+	args := []string{
+		"--port", fmt.Sprintf("%d", o.port),
+		"--foreground",
+		"--no-open",
+		"--log-level", o.logLevel,
+	}
+	if o.enableMDNS {
+		args = append(args, "--mdns", "--mdns-host", o.mdnsHost)
+	}
+	if o.logFile != "" {
+		args = append(args, "--log-file", o.logFile)
+	}
+	if o.noLog {
+		args = append(args, "--no-log")
+	}
+	return args
 }
 
 // portExplicitlySet returns true if --port was explicitly passed on the command line.
@@ -154,20 +202,44 @@ func portExplicitlySet() bool {
 	return found
 }
 
-func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, port int, noOpen, enableMDNS bool, mdnsHost string) {
+func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Config, opts runOptions) {
+	port := opts.port
+
+	// Set up file logging first so everything below (including handler
+	// errors once the server is up) lands in the log file.
+	if opts.noLog && opts.logFile != "" {
+		fmt.Fprintln(os.Stderr, "diffmil: warning: --no-log takes precedence over --log-file")
+	}
+	level, err := logfile.ParseLevel(opts.logLevel)
+	if err != nil {
+		log.Fatal(err)
+	}
+	logCleanup, logPath, err := logfile.Setup(logfile.Options{
+		Port:     port,
+		Level:    level,
+		Path:     opts.logFile,
+		Disabled: opts.noLog,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "diffmil: warning: file logging disabled: %v\n", err)
+		logCleanup, _, _ = logfile.Setup(logfile.Options{Level: level, Disabled: true})
+	}
+	defer logCleanup()
+	cfg.LogPath = logPath
+
 	handler, state := server.New(cfg)
 
 	if err := pidfile.Write(port); err != nil {
-		log.Printf("warning: failed to write PID file: %v", err)
+		slog.Warn("failed to write PID file", "error", err)
 	}
 	defer pidfile.Remove(port)
 
-	if enableMDNS {
-		shutdown, err := mdns.Start(mdnsHost, port)
+	if opts.enableMDNS {
+		shutdown, err := mdns.Start(opts.mdnsHost, port)
 		if err != nil {
-			log.Printf("warning: mDNS disabled: %v", err)
+			slog.Warn("mDNS disabled", "error", err)
 		} else {
-			fmt.Fprintf(os.Stderr, "diffmil: advertising http://%s.local:%d via mDNS\n", mdnsHost, port)
+			fmt.Fprintf(os.Stderr, "diffmil: advertising http://%s.local:%d via mDNS\n", opts.mdnsHost, port)
 			defer shutdown()
 		}
 	}
@@ -188,10 +260,13 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 
 	url := fmt.Sprintf("http://localhost:%d", port)
 	fmt.Fprintf(os.Stderr, "diffmil: serving at %s (pid %d)\n", url, os.Getpid())
+	if logPath != "" {
+		slog.Info("server starting", "url", url, "pid", os.Getpid(), "log", logPath)
+	}
 
-	if !noOpen {
+	if !opts.noOpen {
 		if err := browser.OpenURL(url); err != nil {
-			log.Printf("could not open browser: %v", err)
+			slog.Warn("could not open browser", "error", err)
 		}
 	}
 
@@ -214,7 +289,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 			state.NotifyCommitsChanged(id)
 		})
 		if err != nil {
-			log.Printf("warning: failed to start git watcher for %s: %v", dir, err)
+			slog.Warn("failed to start git watcher", "dir", dir, "error", err)
 			return
 		}
 		watchersMu.Lock()
@@ -251,7 +326,7 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 				entries = append(entries, backup.WorkspaceEntry{Dir: ws.Dir, Label: ws.Label})
 			}
 			if err := backup.Save(port, backup.State{Workspaces: entries}); err != nil {
-				log.Printf("warning: failed to save workspaces backup: %v", err)
+				slog.Warn("failed to save workspaces backup", "error", err)
 			}
 		}
 		for {
@@ -296,7 +371,8 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 	}()
 
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatal(err)
+		slog.Error("server exited", "error", err)
+		os.Exit(1)
 	}
 
 	cancel()
@@ -314,18 +390,16 @@ func runForeground(ctx context.Context, cancel context.CancelFunc, cfg server.Co
 
 		binPath, err := os.Executable()
 		if err != nil {
-			log.Fatalf("restart: cannot find binary: %v", err)
+			slog.Error("restart: cannot find binary", "error", err)
+			os.Exit(1)
 		}
 		cwd, _ := os.Getwd()
-		args := []string{"--port", fmt.Sprintf("%d", port), "--foreground", "--no-open"}
-		if enableMDNS {
-			args = append(args, "--mdns", "--mdns-host", mdnsHost)
-		}
-		cmd := exec.Command(binPath, args...)
+		cmd := exec.Command(binPath, opts.serverArgs()...)
 		cmd.Dir = cwd
 		setSysProcAttr(cmd)
 		if err := cmd.Start(); err != nil {
-			log.Fatalf("restart: failed to start new process: %v", err)
+			slog.Error("restart: failed to start new process", "error", err)
+			os.Exit(1)
 		}
 		cmd.Process.Release()
 	}
@@ -337,6 +411,7 @@ type statusResponse struct {
 	App    string `json:"app"`
 	Status string `json:"status"`
 	PID    int    `json:"pid"`
+	Log    string `json:"log"`
 }
 
 func fetchStatus(url string, timeout ...time.Duration) (*statusResponse, error) {
@@ -372,6 +447,17 @@ func runStatus(url string) {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, s.PID, s.Status)
+	printLogPath(s)
+}
+
+// printLogPath appends the server's log file location to status output so
+// users investigating errors can find the log without reading docs.
+func printLogPath(s *statusResponse) {
+	if s.Log != "" {
+		fmt.Fprintf(os.Stdout, "  log: %s\n", s.Log)
+	} else {
+		fmt.Fprintln(os.Stdout, "  log: (logging disabled)")
+	}
 }
 
 func runStatusAll() {
@@ -389,6 +475,7 @@ func runStatusAll() {
 			pidfile.Remove(p)
 		} else {
 			fmt.Fprintf(os.Stdout, "%s (pid %d, %s)\n", url, s.PID, s.Status)
+			printLogPath(s)
 		}
 	}
 }
@@ -456,21 +543,13 @@ func runRestart(url string) {
 
 // --- Background spawning ---
 
-func spawnBackground(port int, enableMDNS bool, mdnsHost string) (int, error) {
+func spawnBackground(opts runOptions) (int, error) {
 	binPath, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("cannot find binary: %w", err)
 	}
 
-	args := []string{
-		"--port", fmt.Sprintf("%d", port),
-		"--foreground",
-		"--no-open",
-	}
-	if enableMDNS {
-		args = append(args, "--mdns", "--mdns-host", mdnsHost)
-	}
-	args = append(args, flag.Args()...)
+	args := append(opts.serverArgs(), flag.Args()...)
 
 	cmd := exec.Command(binPath, args...)
 	if isStdinPipe() {

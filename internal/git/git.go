@@ -1,7 +1,10 @@
 package git
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -23,13 +26,28 @@ type Commit struct {
 // parser on the frontend cannot match back to file paths.
 var stdPrefixConfig = []string{"-c", "diff.mnemonicprefix=false", "-c", "diff.noprefix=false"}
 
+// output runs the command and, on failure, wraps the error with the full
+// command line and git's stderr so callers (and logs) see the actual cause,
+// e.g. `git diff-tree ... abc123: exit status 128: fatal: bad object abc123`.
+func output(cmd *exec.Cmd) ([]byte, error) {
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			return nil, fmt.Errorf("%s: %w: %s", strings.Join(cmd.Args, " "), err, bytes.TrimSpace(ee.Stderr))
+		}
+		return nil, fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
+	}
+	return out, nil
+}
+
 // runDiff executes a diff-producing git subcommand with stdPrefixConfig
 // applied, so every diff this package emits carries the standard prefixes.
 func runDiff(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmdArgs := append(append([]string{}, stdPrefixConfig...), args...)
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 	cmd.Dir = dir
-	return cmd.Output()
+	return output(cmd)
 }
 
 // Diff runs `git diff` with the given arguments and returns the raw patch.
@@ -55,7 +73,7 @@ func Log(ctx context.Context, dir string, maxCount int) ([]Commit, error) {
 	)
 	cmd.Dir = dir
 
-	out, err := cmd.Output()
+	out, err := output(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +126,7 @@ func parseTags(refs string) []string {
 func CurrentBranch(ctx context.Context, dir string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
 	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := output(cmd)
 	if err != nil {
 		return "", err
 	}
@@ -131,6 +149,20 @@ func DiffUncommitted(ctx context.Context, dir string) ([]byte, error) {
 	return runDiff(ctx, dir, "diff", "--no-ext-diff", "--color=never", "HEAD")
 }
 
+// GitDir returns the absolute path to the repository's .git directory for
+// the given directory. Unlike joining dir+"/.git", this resolves workspaces
+// registered from a subdirectory of a repository, as well as linked
+// worktrees whose .git is a file pointing elsewhere.
+func GitDir(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--absolute-git-dir")
+	cmd.Dir = dir
+	out, err := output(cmd)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // IsGitRepo returns true if the given directory is inside a git repository.
 func IsGitRepo(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
@@ -151,7 +183,7 @@ func ShowBlob(ctx context.Context, dir string, ref string, path string) ([]byte,
 		if _, ok := err.(*exec.ExitError); ok {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
 	}
 	return out, nil
 }
