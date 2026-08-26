@@ -28,6 +28,7 @@ import { ThemeProvider } from "./hooks/useTheme";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { isAutoFoldPath } from "./constants/autoFold";
 import { loadFromStorage, saveToStorage } from "./utils/storage";
+import { apiError } from "./utils/apiError";
 import {
   useComments,
   listCommitsWithComments,
@@ -456,12 +457,15 @@ function AppContent() {
     activeWsIdRef.current = wsId;
   }, [wsId]);
 
-  // Applies a freshly-fetched commit list and prunes orphan comments. Skips
-  // pruning when the list is empty (could be transient fetch failure) or
-  // belongs to a workspace the user already switched away from.
+  // Applies a freshly-fetched commit list and prunes orphan comments.
+  // A list fetched for a workspace the user already switched away from is
+  // dropped entirely: applying it would show another repository's commits,
+  // and selecting one of them sends its hash to the wrong workspace (git
+  // then fails with "bad object"). Pruning is also skipped when the list is
+  // empty (could be a transient fetch failure).
   const applyCommits = useCallback((wsForList: string | null, list: Commit[]) => {
-    setCommits(list);
     if (wsForList !== activeWsIdRef.current) return;
+    setCommits(list);
     if (list.length === 0) return;
     const keep = new Set(list.map((c) => c.hash));
     const removed = pruneOrphanWorkspaceComments(wsForList, keep);
@@ -479,20 +483,24 @@ function AppContent() {
     if (workspaces.length > 0 && !wsId) return;
     setLoading(true);
     Promise.all([
-      fetch("/_/api/diff" + wsParam).then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fetch("/_/api/diff" + wsParam).then(async (res) => {
+        if (!res.ok) throw await apiError(res);
         return res.json() as Promise<DiffResponse>;
       }),
       fetchCommits(),
       fetchBranch(),
     ])
       .then(([diff, commitList]) => {
+        // Drop responses that resolve after the user switched workspaces;
+        // a newer effect run owns the state now.
+        if (wsId !== activeWsIdRef.current) return;
         setDiffData(diff);
         applyCommits(wsId, commitList);
         setSelectedCommit(null);
         setLoading(false);
       })
       .catch((err) => {
+        if (wsId !== activeWsIdRef.current) return;
         setError(err.message);
         setLoading(false);
       });
@@ -528,12 +536,14 @@ function AppContent() {
 
     es.addEventListener("update", (e) => {
       if (!isRelevant((e as MessageEvent).data)) return;
+      const wsAtFetch = wsIdSseRef.current;
       fetch("/_/api/diff" + wsParamSseRef.current)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        .then(async (res) => {
+          if (!res.ok) throw await apiError(res);
           return res.json() as Promise<DiffResponse>;
         })
         .then((data) => {
+          if (wsAtFetch !== wsIdSseRef.current) return;
           setDiffData(data);
           setSelectedCommit(null);
         })
@@ -567,15 +577,17 @@ function AppContent() {
       if (wsId) params.set("ws", wsId);
       params.set("commit", hash);
       fetch(`/_/api/diff?${params.toString()}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        .then(async (res) => {
+          if (!res.ok) throw await apiError(res);
           return res.json() as Promise<DiffResponse>;
         })
         .then((data) => {
+          if (wsId !== activeWsIdRef.current) return;
           setDiffData(data);
           setDiffLoading(false);
         })
         .catch((err) => {
+          if (wsId !== activeWsIdRef.current) return;
           setError(err.message);
           setDiffLoading(false);
         });

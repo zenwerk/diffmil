@@ -1,12 +1,14 @@
 package watcher
 
 import (
+	"context"
 	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	gitcmd "github.com/zenwerk/diffmil/internal/git"
 )
 
 // GitWatcher monitors a git repository for changes and calls onChange
@@ -20,12 +22,18 @@ type GitWatcher struct {
 // New creates a GitWatcher for the given repository directory.
 // onChange is called (debounced) when git state changes are detected.
 func New(repoDir string, onChange func()) (*GitWatcher, error) {
-	w, err := fsnotify.NewWatcher()
+	// Resolve the real .git location: repoDir may be a subdirectory of the
+	// repository (registered via `diffmil` run from a subdir) or a linked
+	// worktree, where repoDir/.git does not exist or is a file.
+	gitDir, err := gitcmd.GitDir(context.Background(), repoDir)
 	if err != nil {
 		return nil, err
 	}
 
-	gitDir := filepath.Join(repoDir, ".git")
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
 
 	// Watch .git directory for HEAD, index, refs changes
 	if err := w.Add(gitDir); err != nil {
